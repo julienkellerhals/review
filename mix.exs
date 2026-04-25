@@ -26,7 +26,7 @@ defmodule Review.MixProject do
   end
 
   defp description do
-    "Mix tasks for generating, applying, and cleaning up Codex architecture review workflows."
+    "Mix tasks for generating, applying, and cleaning up Codex review workflows."
   end
 
   defp package do

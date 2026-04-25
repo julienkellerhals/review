@@ -1,6 +1,6 @@
 defmodule Review do
   @moduledoc """
-  Mix tasks for generating and applying repository architecture reviews.
+  Mix tasks for generating and applying repository reviews.
   """
 
   defmodule Error do

@@ -6,8 +6,8 @@ defmodule Review.Apply do
   @default_codex_command_max_attempts 3
   @default_apply_concurrency 10
   @fix_approved "FIX_APPROVED"
-  @deferred_review_start "<!-- apply-architecture-deferred-start -->"
-  @deferred_review_end "<!-- apply-architecture-deferred-end -->"
+  @deferred_review_start "<!-- apply-review-deferred-start -->"
+  @deferred_review_end "<!-- apply-review-deferred-end -->"
   @source_file_pattern ~r/^Source file:\s+(.+?)$/
 
   def main(["-h"]), do: usage()
@@ -25,7 +25,7 @@ defmodule Review.Apply do
   end
 
   defp usage do
-    IO.puts("Usage: mix review.apply [architecture_reviews|path/to/review.md]")
+    IO.puts("Usage: mix review.apply [review|path/to/review.md]")
 
     IO.puts("Set REVIEW_DIR to change the default review directory.")
 
@@ -621,7 +621,7 @@ defmodule Review.Apply do
       |> String.trim("-")
       |> String.slice(0, 80)
 
-    "apply-architecture/#{review_slug}-#{suffix}"
+    "apply-review/#{review_slug}-#{suffix}"
   end
 
   defp worktree_path(root, relative_review) do
@@ -633,7 +633,7 @@ defmodule Review.Apply do
 
     Path.join(
       git_common_dir!(root),
-      "apply-architecture-worktrees/#{review_slug}-#{unique_worktree_suffix()}"
+      "apply-review-worktrees/#{review_slug}-#{unique_worktree_suffix()}"
     )
   end
 
@@ -708,7 +708,7 @@ defmodule Review.Apply do
   end
 
   defp review_target(root, []) do
-    System.get_env("REVIEW_DIR", "architecture_reviews")
+    System.get_env("REVIEW_DIR", "review")
     |> Path.expand(root)
   end
 
@@ -818,7 +818,7 @@ defmodule Review.Apply do
       if File.dir?(target) do
         target
       else
-        Path.join(root, System.get_env("REVIEW_DIR", "architecture_reviews"))
+        Path.join(root, System.get_env("REVIEW_DIR", "review"))
       end
 
     relative_review = Path.relative_to(review_path, target_dir)
@@ -869,7 +869,7 @@ defmodule Review.Apply do
     paths = commit_paths(root, baseline_paths, [relative_review])
 
     commit_review_changes!(paths, root, relative_review, fn ->
-      "Remove stale architecture review"
+      "Remove stale review"
     end)
   end
 
@@ -937,7 +937,7 @@ defmodule Review.Apply do
   end
 
   defp run_codex(args, prompt) do
-    prompt_path = tmp_path("codex-architecture-apply-prompt", "md")
+    prompt_path = tmp_path("codex-review-apply-prompt", "md")
 
     File.write!(prompt_path, prompt)
 
@@ -949,7 +949,7 @@ defmodule Review.Apply do
   end
 
   defp run_codex_with_retry(args, prompt_path, max_attempts, attempt) do
-    log_path = tmp_path("codex-architecture-apply", "log")
+    log_path = tmp_path("codex-review-apply", "log")
 
     command =
       (["codex" | args] |> Enum.map_join(" ", &shell_quote/1)) <>
@@ -1064,7 +1064,7 @@ defmodule Review.Apply do
   end
 
   defp review_fix_result!(root, relative_review, source_file) do
-    output_path = tmp_markdown_path("codex-architecture-fix-review")
+    output_path = tmp_markdown_path("codex-fix-review")
 
     IO.puts("Reviewing fix against #{relative_review}")
 
@@ -1185,7 +1185,7 @@ defmodule Review.Apply do
   end
 
   defp generate_commit_message!(root, relative_review, source_file) do
-    output_path = tmp_markdown_path("codex-architecture-commit-message")
+    output_path = tmp_markdown_path("codex-review-commit-message")
 
     IO.puts("Generating commit message for #{relative_review}")
 

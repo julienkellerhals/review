@@ -2,7 +2,7 @@ defmodule ReviewTest do
   use ExUnit.Case, async: false
 
   test "apply prompts expose shared workflow guidance" do
-    prompt = Review.Apply.apply_prompt("architecture_reviews/foo/review.md", "lib/foo.ex", nil)
+    prompt = Review.Apply.apply_prompt("review/foo/review.md", "lib/foo.ex", nil)
 
     assert prompt =~ "Use the improve-codebase-architecture skill."
     assert prompt =~ "Use design-an-interface"
@@ -48,12 +48,12 @@ defmodule ReviewTest do
 
   test "configured source dirs limit default source discovery" do
     root = tmp_dir("source-dirs")
-    review_dir = Path.join(root, "architecture_reviews")
+    review_dir = Path.join(root, "review")
 
     write_file!(root, "lib/kept.ex")
     write_file!(root, "assets/kept.ts")
     write_file!(root, "ignored/skipped.ex")
-    write_file!(root, "architecture_reviews/lib/kept.ex/review.md")
+    write_file!(root, "review/lib/kept.ex/review.md")
 
     previous = Application.get_env(:review, :source_dirs)
 

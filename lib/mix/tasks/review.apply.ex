@@ -1,13 +1,13 @@
 defmodule Mix.Tasks.Review.Apply do
   use Mix.Task
 
-  @shortdoc "Apply generated architecture review markdown files"
+  @shortdoc "Apply generated review markdown files"
 
   @moduledoc """
-  Applies generated architecture review markdown files.
+  Applies generated review markdown files.
 
       $ mix review.apply
-      $ mix review.apply architecture_reviews/path/to/review.md
+      $ mix review.apply review/path/to/review.md
 
   Environment variables such as `REVIEW_DIR`, `REVIEW_SOURCE_BLACKLIST`,
   `CODEX_MODEL`, `CODEX_REASONING_EFFORT`, `CODEX_FIX_REVIEW_MAX_ATTEMPTS`,

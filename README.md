@@ -1,12 +1,12 @@
 # Review
 
-Standalone Mix tasks for Codex-driven architecture review workflows.
+Standalone Mix tasks for Codex-driven review workflows.
 
 ## Tasks
 
 ```sh
 mix review.generate [path/to/source-file ...]
-mix review.apply [architecture_reviews|path/to/review.md]
+mix review.apply [review|path/to/review.md]
 mix review.cleanup_worktrees
 ```
 

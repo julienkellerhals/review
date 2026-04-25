@@ -30,7 +30,7 @@ defmodule Review.Generate do
 
     IO.puts("Explicit file arguments must be under this repository.")
     IO.puts(~s(Configure default discovery with `config :review, source_dirs: ["lib", "test"]`.))
-    IO.puts("Set REVIEW_DIR to choose the output directory. Defaults to architecture_reviews.")
+    IO.puts("Set REVIEW_DIR to choose the output directory. Defaults to review.")
     IO.puts("Set REVIEW_CONCURRENCY to choose parallel Codex execs. Defaults to 10.")
 
     IO.puts(
@@ -53,7 +53,7 @@ defmodule Review.Generate do
   end
 
   defp review_dir(root) do
-    System.get_env("REVIEW_DIR", "architecture_reviews")
+    System.get_env("REVIEW_DIR", "review")
     |> Path.expand(root)
   end
 
@@ -220,7 +220,7 @@ defmodule Review.Generate do
   defp report_review_failures(failures) do
     message =
       [
-        "#{length(failures)} architecture review(s) failed:",
+        "#{length(failures)} review(s) failed:",
         Enum.map_join(failures, "\n", &("- " <> &1))
       ]
       |> Enum.join("\n")
@@ -241,7 +241,7 @@ defmodule Review.Generate do
   end
 
   defp run_review(root, review_path, relative_source) do
-    tmp_path = tmp_path("codex-architecture-review", "md")
+    tmp_path = tmp_path("codex-review", "md")
     prompt = review_prompt(relative_source, recommendation_limit())
 
     IO.puts("Reviewing #{relative_source}")
@@ -297,7 +297,7 @@ defmodule Review.Generate do
   end
 
   defp run_codex(args, prompt) do
-    prompt_path = tmp_path("codex-architecture-prompt", "md")
+    prompt_path = tmp_path("codex-review-prompt", "md")
     File.write!(prompt_path, prompt)
 
     result =
@@ -348,7 +348,7 @@ defmodule Review.Generate do
     - If nothing is worth pruning, output exactly:
     NO_ACTIONABLE_REVIEW
     - Otherwise output markdown only:
-    - Start actionable markdown with `# Architecture Review: #{relative_source}`.
+    - Start actionable markdown with `# Review: #{relative_source}`.
     - Put this metadata block immediately after the title, exactly in this format:
     Source file: `#{relative_source}`
     Affected files:
@@ -394,7 +394,7 @@ defmodule Review.Generate do
   end
 
   defp valid_actionable_review?(content, relative_source) do
-    expected_title = "# Architecture Review: #{relative_source}"
+    expected_title = "# Review: #{relative_source}"
     expected_source_line = "Source file: `#{relative_source}`"
 
     case :binary.split(content, "\n", [:global]) do

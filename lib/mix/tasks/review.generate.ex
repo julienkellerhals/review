@@ -1,10 +1,10 @@
 defmodule Mix.Tasks.Review.Generate do
   use Mix.Task
 
-  @shortdoc "Generate architecture review markdown files"
+  @shortdoc "Generate review markdown files"
 
   @moduledoc """
-  Generates architecture review markdown files.
+  Generates review markdown files.
 
       $ mix review.generate
       $ mix review.generate lib/my_app/example.ex
