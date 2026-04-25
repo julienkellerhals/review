@@ -53,8 +53,7 @@ defmodule Review.Generate do
   end
 
   defp review_dir(root) do
-    System.get_env("REVIEW_DIR", "review")
-    |> Path.expand(root)
+    Review.Config.review_dir(root)
   end
 
   defp review_concurrency do

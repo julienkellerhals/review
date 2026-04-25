@@ -23,12 +23,14 @@ folders. Configure the default source roots in the consuming project's
 import Config
 
 config :review,
+  review_dir: "review",
   source_dirs: ["lib", "test", "config", "priv", "assets"]
 ```
 
-`source_dirs` entries must be repo-relative directories or files. Explicit file
-arguments passed to `mix review.generate path/to/file.ex` are still honored even
-when they are outside the configured default discovery roots.
+`review_dir` controls where markdown files are written. `source_dirs` entries
+must be repo-relative directories or files. Explicit file arguments passed to
+`mix review.generate path/to/file.ex` are still honored even when they are
+outside the configured default discovery roots.
 
 Failures are reported as Mix task errors with the underlying command, file, or
 review path included. The library code raises `Review.Error` for expected

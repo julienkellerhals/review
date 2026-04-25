@@ -16,6 +16,7 @@ defmodule Mix.Tasks.Review.Generate do
   Configure default discovery roots in the consuming project's `config/config.exs`:
 
       config :review,
+        review_dir: "review",
         source_dirs: ["lib", "test", "config"]
 
   Without this config, the generator searches from the repository root.

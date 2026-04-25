@@ -708,8 +708,7 @@ defmodule Review.Apply do
   end
 
   defp review_target(root, []) do
-    System.get_env("REVIEW_DIR", "review")
-    |> Path.expand(root)
+    Review.Config.review_dir(root)
   end
 
   defp review_target(root, [target | _rest]), do: Path.expand(target, root)
@@ -818,7 +817,7 @@ defmodule Review.Apply do
       if File.dir?(target) do
         target
       else
-        Path.join(root, System.get_env("REVIEW_DIR", "review"))
+        Review.Config.review_dir(root)
       end
 
     relative_review = Path.relative_to(review_path, target_dir)

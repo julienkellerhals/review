@@ -1,12 +1,40 @@
 defmodule Review.Config do
   @moduledoc false
 
+  @default_review_dir "review"
   @default_source_dirs ["."]
+
+  def review_dir(root) do
+    dir =
+      case System.get_env("REVIEW_DIR") do
+        nil -> Application.get_env(:review, :review_dir, @default_review_dir)
+        "" -> Application.get_env(:review, :review_dir, @default_review_dir)
+        value -> value
+      end
+
+    dir
+    |> normalize_review_dir!()
+    |> Path.expand(root)
+  end
 
   def source_dirs do
     :review
     |> Application.get_env(:source_dirs, @default_source_dirs)
     |> normalize_source_dirs!()
+  end
+
+  defp normalize_review_dir!(dir) when is_binary(dir) do
+    dir = String.trim(dir)
+
+    if dir == "" do
+      raise Review.Error, "Expected :review, :review_dir to be a non-empty path"
+    end
+
+    dir
+  end
+
+  defp normalize_review_dir!(value) do
+    raise Review.Error, "Expected :review, :review_dir to be a path, got: #{inspect(value)}"
   end
 
   defp normalize_source_dirs!(dirs) when is_list(dirs) do

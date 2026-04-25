@@ -90,6 +90,19 @@ defmodule ReviewTest do
     end
   end
 
+  test "review dir can be configured with application config" do
+    root = tmp_dir("review-dir")
+    previous = Application.get_env(:review, :review_dir)
+
+    try do
+      Application.put_env(:review, :review_dir, "custom_reviews")
+
+      assert Review.Config.review_dir(root) == Path.join(root, "custom_reviews")
+    after
+      restore_app_env(:review_dir, previous)
+    end
+  end
+
   test "mix task converts review errors into Mix errors instead of halting the VM" do
     Mix.Task.reenable("review.generate")
 
