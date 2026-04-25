@@ -1,5 +1,5 @@
 defmodule ReviewTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   test "apply prompts expose shared workflow guidance" do
     prompt = Review.Apply.apply_prompt("architecture_reviews/foo/review.md", "lib/foo.ex", nil)
@@ -46,6 +46,50 @@ defmodule ReviewTest do
     end
   end
 
+  test "configured source dirs limit default source discovery" do
+    root = tmp_dir("source-dirs")
+    review_dir = Path.join(root, "architecture_reviews")
+
+    write_file!(root, "lib/kept.ex")
+    write_file!(root, "assets/kept.ts")
+    write_file!(root, "ignored/skipped.ex")
+    write_file!(root, "architecture_reviews/lib/kept.ex/review.md")
+
+    previous = Application.get_env(:review, :source_dirs)
+
+    try do
+      Application.put_env(:review, :source_dirs, ["lib", "assets"])
+
+      discovered =
+        root
+        |> Review.Generate.discover_source_files(
+          review_dir,
+          Review.SourcePolicy.source_blacklist(),
+          Review.Config.source_dirs()
+        )
+        |> Enum.map(&Path.relative_to(&1, root))
+        |> Enum.sort()
+
+      assert discovered == ["assets/kept.ts", "lib/kept.ex"]
+    after
+      restore_app_env(:source_dirs, previous)
+    end
+  end
+
+  test "invalid source dirs config raises a review error instead of halting the VM" do
+    previous = Application.get_env(:review, :source_dirs)
+
+    try do
+      Application.put_env(:review, :source_dirs, [123])
+
+      assert_raise Review.Error, ~r/source_dirs entries/, fn ->
+        Review.Config.source_dirs()
+      end
+    after
+      restore_app_env(:source_dirs, previous)
+    end
+  end
+
   test "mix task converts review errors into Mix errors instead of halting the VM" do
     Mix.Task.reenable("review.generate")
 
@@ -73,4 +117,22 @@ defmodule ReviewTest do
 
     assert halt_references == []
   end
+
+  defp tmp_dir(name) do
+    path =
+      Path.join(System.tmp_dir!(), "review-test-#{name}-#{System.unique_integer([:positive])}")
+
+    File.rm_rf!(path)
+    File.mkdir_p!(path)
+    path
+  end
+
+  defp write_file!(root, path) do
+    full_path = Path.join(root, path)
+    File.mkdir_p!(Path.dirname(full_path))
+    File.write!(full_path, "content")
+  end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:review, key)
+  defp restore_app_env(key, value), do: Application.put_env(:review, key, value)
 end

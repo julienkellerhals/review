@@ -15,6 +15,21 @@ same environment variables as the original scripts, including `REVIEW_DIR`,
 `REVIEW_SOURCE_BLACKLIST`, `CODEX_MODEL`, and the task-specific concurrency and
 retry settings.
 
+By default, `mix review.generate` searches the whole repository except ignored
+folders. Configure the default source roots in the consuming project's
+`config/config.exs`:
+
+```elixir
+import Config
+
+config :review,
+  source_dirs: ["lib", "test", "config", "priv", "assets"]
+```
+
+`source_dirs` entries must be repo-relative directories or files. Explicit file
+arguments passed to `mix review.generate path/to/file.ex` are still honored even
+when they are outside the configured default discovery roots.
+
 Failures are reported as Mix task errors with the underlying command, file, or
 review path included. The library code raises `Review.Error` for expected
 operational failures and does not call `System.halt/1`, so test runs and parent

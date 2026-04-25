@@ -13,10 +13,11 @@ defmodule Review.Generate do
     review_dir = review_dir(root)
     concurrency = review_concurrency()
     source_blacklist = SourcePolicy.source_blacklist()
+    source_dirs = Review.Config.source_dirs()
     File.mkdir_p!(review_dir)
 
     root
-    |> files_to_review(args, review_dir, source_blacklist)
+    |> files_to_review(args, review_dir, source_blacklist, source_dirs)
     |> review_files(root, review_dir, concurrency)
   end
 
@@ -28,6 +29,7 @@ defmodule Review.Generate do
     )
 
     IO.puts("Explicit file arguments must be under this repository.")
+    IO.puts(~s(Configure default discovery with `config :review, source_dirs: ["lib", "test"]`.))
     IO.puts("Set REVIEW_DIR to choose the output directory. Defaults to architecture_reviews.")
     IO.puts("Set REVIEW_CONCURRENCY to choose parallel Codex execs. Defaults to 10.")
 
@@ -74,22 +76,21 @@ defmodule Review.Generate do
     end
   end
 
-  defp files_to_review(root, [], review_dir, source_blacklist) do
+  defp files_to_review(root, [], review_dir, source_blacklist, source_dirs) do
     root
-    |> discover_source_files(review_dir, source_blacklist)
+    |> discover_source_files(review_dir, source_blacklist, source_dirs)
     |> Enum.sort()
   end
 
-  defp files_to_review(root, args, _review_dir, source_blacklist) do
+  defp files_to_review(root, args, _review_dir, source_blacklist, _source_dirs) do
     Enum.map(args, &validate_source_file!(root, &1, source_blacklist))
   end
 
   defp validate_source_file!(root, path, source_blacklist) do
     source = Path.expand(path, root)
-    root_prefix = root <> "/"
 
     cond do
-      not String.starts_with?(source, root_prefix) ->
+      not under_repo_root?(root, source) ->
         abort("Expected a file under #{root}, got: #{source}")
 
       SourcePolicy.blacklisted_path?(root, source, source_blacklist) ->
@@ -103,8 +104,46 @@ defmodule Review.Generate do
     end
   end
 
-  defp discover_source_files(root, review_dir, source_blacklist) do
-    walk(root, root, Path.expand(review_dir), source_blacklist)
+  def discover_source_files(
+        root,
+        review_dir,
+        source_blacklist,
+        source_dirs \\ Review.Config.source_dirs()
+      ) do
+    root = Path.expand(root)
+    review_dir = Path.expand(review_dir, root)
+
+    source_dirs
+    |> Enum.flat_map(&discover_source_path(root, &1, review_dir, source_blacklist))
+    |> Enum.uniq()
+  end
+
+  defp discover_source_path(root, source_dir, review_dir, source_blacklist) do
+    source_path = Path.expand(source_dir, root)
+
+    cond do
+      not under_repo_root?(root, source_path) ->
+        abort("Configured source dir must be under #{root}, got: #{source_path}")
+
+      not File.exists?(source_path) ->
+        abort("Configured source dir does not exist: #{source_dir}")
+
+      SourcePolicy.blacklisted_path?(root, source_path, source_blacklist) ->
+        []
+
+      File.dir?(source_path) ->
+        walk(root, source_path, review_dir, source_blacklist)
+
+      File.regular?(source_path) and SourcePolicy.source_file_extension?(source_path) ->
+        [Path.expand(source_path)]
+
+      true ->
+        []
+    end
+  end
+
+  defp under_repo_root?(root, path) do
+    path == root or String.starts_with?(path, root <> "/")
   end
 
   defp walk(root, dir, review_dir, source_blacklist) do

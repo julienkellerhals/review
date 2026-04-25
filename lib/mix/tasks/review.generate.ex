@@ -12,6 +12,13 @@ defmodule Mix.Tasks.Review.Generate do
   Environment variables such as `REVIEW_DIR`, `REVIEW_CONCURRENCY`,
   `REVIEW_SOURCE_BLACKLIST`, `REVIEW_RECOMMENDATION_LIMIT`, `CODEX_MODEL`, and
   `CODEX_REASONING_EFFORT` control the review run.
+
+  Configure default discovery roots in the consuming project's `config/config.exs`:
+
+      config :review,
+        source_dirs: ["lib", "test", "config"]
+
+  Without this config, the generator searches from the repository root.
   """
 
   @impl Mix.Task
