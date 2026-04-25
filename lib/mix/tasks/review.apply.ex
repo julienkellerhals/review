@@ -1,0 +1,35 @@
+defmodule Mix.Tasks.Review.Apply do
+  use Mix.Task
+
+  @shortdoc "Apply generated architecture review markdown files"
+
+  @moduledoc """
+  Applies generated architecture review markdown files.
+
+      $ mix review.apply
+      $ mix review.apply architecture_reviews/path/to/review.md
+
+  Environment variables such as `REVIEW_DIR`, `REVIEW_SOURCE_BLACKLIST`,
+  `CODEX_MODEL`, `CODEX_REASONING_EFFORT`, `CODEX_FIX_REVIEW_MAX_ATTEMPTS`,
+  `CODEX_COMMAND_MAX_ATTEMPTS`, and `CODEX_APPLY_CONCURRENCY` control the apply
+  run.
+  """
+
+  @impl Mix.Task
+  def run(args) do
+    run_review_task(fn -> Review.Apply.main(args) end)
+  end
+
+  defp run_review_task(fun) do
+    fun.()
+  rescue
+    exception in [Review.Error] ->
+      Mix.raise(Exception.message(exception))
+
+    exception ->
+      Mix.raise("Unexpected review.apply failure: #{Exception.message(exception)}")
+  catch
+    kind, reason ->
+      Mix.raise("Unexpected review.apply #{kind}: #{inspect(reason)}")
+  end
+end
