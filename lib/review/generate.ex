@@ -1,6 +1,5 @@
 defmodule Review.Generate do
   @default_concurrency 10
-  @default_recommendation_limit 20
   @default_model "gpt-5.5"
   @default_reasoning_effort "high"
   alias Review.SourcePolicy
@@ -37,10 +36,6 @@ defmodule Review.Generate do
       "Set REVIEW_SOURCE_BLACKLIST to comma-separated source folder names to exclude. Bare names and **/name/ both match any path segment."
     )
 
-    IO.puts(
-      "Set REVIEW_RECOMMENDATION_LIMIT to cap recommendations per generated review. Defaults to 20."
-    )
-
     IO.puts("Set CODEX_MODEL to override the Codex model. Defaults to gpt-5.5.")
     IO.puts("Set CODEX_REASONING_EFFORT to override the reasoning effort. Defaults to high.")
   end
@@ -60,12 +55,6 @@ defmodule Review.Generate do
     "REVIEW_CONCURRENCY"
     |> System.get_env(Integer.to_string(@default_concurrency))
     |> parse_positive_integer!("REVIEW_CONCURRENCY")
-  end
-
-  defp recommendation_limit do
-    "REVIEW_RECOMMENDATION_LIMIT"
-    |> System.get_env(Integer.to_string(@default_recommendation_limit))
-    |> parse_positive_integer!("REVIEW_RECOMMENDATION_LIMIT")
   end
 
   defp parse_positive_integer!(value, name) do
@@ -241,7 +230,7 @@ defmodule Review.Generate do
 
   defp run_review(root, review_path, relative_source) do
     tmp_path = tmp_path("codex-review", "md")
-    prompt = review_prompt(relative_source, recommendation_limit())
+    prompt = review_prompt(relative_source)
 
     IO.puts("Reviewing #{relative_source}")
 
@@ -324,39 +313,44 @@ defmodule Review.Generate do
     IO.puts(:stderr, output)
   end
 
-  defp review_prompt(relative_source, recommendation_limit) do
+  defp review_prompt(relative_source) do
     """
-    Review `#{relative_source}` for maintenance pruning after iterative AI coding.
+    Review `#{relative_source}` for high-value maintenance cleanup after iterative AI coding.
+    Do not edit files.
 
-    Use:
-    - improve-codebase-architecture: find shallow modules, tight coupling, duplicated orchestration, and deeper boundaries.
-    - design-an-interface when the best cleanup depends on comparing alternate module/API/file boundaries.
-    - request-refactor-plan methods: order risky cleanup in small reversible steps with tests.
-    - use-igniter when a mechanical Elixir rename/move/remove would be safer than hand edits.
-    - AGENTS.md plus relevant language/framework docs only if this file touches those layers.
-
-    Scope: this file plus direct collaborators only. Do not scan the whole repo.
-    Bias: delete, merge, simplify, move files, or shrink public surface before adding abstractions.
-    Look for: dead code, stale flags/options/prompts, unused Codex or agent workflow leftovers, duplicate adapters, brittle seams, and tests that only preserve shallow structure.
-    You may recommend moving/renaming files or reshaping directories when a clearer structure would reduce coupling.
-
-    Return at most #{recommendation_limit} concrete cleanup recommendations with focused verification.
-
-    Rules:
-    - Do not edit files.
-    - If nothing is worth pruning, output exactly:
+    Outcome:
+    - Exhaustively report every high-confidence actionable finding inside the review scope.
+    - Do not stop after a fixed number of findings.
+    - Prefer deletion, merging, simplification, moves, or public-surface reduction before new abstractions.
+    - Skip speculative, cosmetic, or low-value cleanup. If nothing is worth applying, output exactly:
     NO_ACTIONABLE_REVIEW
-    - Otherwise output markdown only:
+
+    Review scope:
+    - Inspect `#{relative_source}` and only direct collaborators needed to judge it.
+    - Do not scan the whole repo.
+    - Look for dead code, stale flags/options/prompts, unused Codex or agent workflow leftovers, duplicate adapters, brittle boundaries, and tests that preserve shallow structure without behavior.
+    - Recommend moving, renaming, or reshaping files only when it clearly reduces coupling or clarifies ownership.
+
+    Tooling:
+    - Use the improve-codebase-architecture skill to identify shallow modules, tight coupling, duplicated orchestration, and better boundaries.
+    - Use the design-an-interface skill only when the recommendation depends on choosing between API, module, or file-boundary options.
+    - Use AGENTS.md and relevant language/framework docs only if this file touches those layers.
+    - Mention use-igniter in the recommendation or verification when a mechanical Elixir rename, move, or removal would be safer than hand edits.
+
+    Markdown output:
+    - Output markdown only unless returning NO_ACTIONABLE_REVIEW.
     - Start actionable markdown with `# Review: #{relative_source}`.
-    - Put this metadata block immediately after the title, exactly in this format:
+    - Put this metadata block immediately after the title, exactly:
     Source file: `#{relative_source}`
     Affected files:
     - `#{relative_source}`
     - `path/to/other_file.ext`
-    - Use repo-relative paths only. Do not use markdown links, absolute paths, inline comma-separated lists, or put file names on the `Affected files:` line.
-    - Include every file the implementation is expected to edit, move, or delete. Include `#{relative_source}` at minimum.
-    - Use only these sections: Overview, Findings, Recommendations, Verification.
+    - Use repo-relative affected-file paths only. Do not use markdown links, absolute paths, inline comma-separated lists, or file names on the `Affected files:` line.
+    - Include every file the implementation is expected to edit, move, or delete; include `#{relative_source}` at minimum.
+    - Use exactly these sections: Overview, Findings, Recommendations, Verification.
     - Findings must name concrete files/functions and the maintenance risk.
+    - Recommendations must state the exact cleanup, why it is worth doing, and any ordering needed to keep the change safe.
+    - Verification must list focused tests or checks for the cleanup.
     """
   end
 
