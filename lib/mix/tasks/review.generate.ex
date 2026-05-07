@@ -10,8 +10,8 @@ defmodule Mix.Tasks.Review.Generate do
       $ mix review.generate lib/my_app/example.ex
 
   Environment variables such as `REVIEW_DIR`, `REVIEW_CONCURRENCY`,
-  `REVIEW_SOURCE_BLACKLIST`, `REVIEW_RECOMMENDATION_LIMIT`, `CODEX_MODEL`, and
-  `CODEX_REASONING_EFFORT` control the review run.
+  `REVIEW_SOURCE_BLACKLIST`, `CODEX_MODEL`, and `CODEX_REASONING_EFFORT` control
+  the review run.
 
   Configure default discovery roots in the consuming project's `config/config.exs`:
 
