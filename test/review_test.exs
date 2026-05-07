@@ -22,6 +22,45 @@ defmodule ReviewTest do
     assert second.relative_review == "two/review.md"
   end
 
+  test "apply rejects reviews that affect files outside the current repo" do
+    root = tmp_dir("outside-affected-files")
+
+    run!(root, "git", ["init"])
+    write_file!(root, "lib/foo.ex")
+    run!(root, "git", ["add", "lib/foo.ex"])
+
+    run!(root, "git", [
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "user.name=Test",
+      "commit",
+      "-m",
+      "init"
+    ])
+
+    write_file!(
+      root,
+      "review/lib/foo.ex/review.md",
+      """
+      # Review: lib/foo.ex
+      Source file: `lib/foo.ex`
+      Affected files:
+      - `lib/foo.ex`
+      - `../sibling/bar.ex`
+
+      ## Overview
+      Update both files.
+      """
+    )
+
+    in_dir(root, fn ->
+      assert_raise Review.Error, ~r/Affected file escapes the repository root/, fn ->
+        Review.Apply.main(["review"])
+      end
+    end)
+  end
+
   test "invalid generator input raises a review error instead of halting the VM" do
     assert_raise Review.Error, ~r/Expected a file under/, fn ->
       Review.Generate.main(["/definitely/outside/this/repo.ex"])
@@ -140,10 +179,28 @@ defmodule ReviewTest do
     path
   end
 
-  defp write_file!(root, path) do
+  defp write_file!(root, path, content \\ "content") do
     full_path = Path.join(root, path)
     File.mkdir_p!(Path.dirname(full_path))
-    File.write!(full_path, "content")
+    File.write!(full_path, content)
+  end
+
+  defp run!(root, command, args) do
+    case System.cmd(command, args, cd: root, stderr_to_stdout: true) do
+      {_output, 0} -> :ok
+      {output, status} -> flunk("#{command} #{inspect(args)} exited with #{status}:\n#{output}")
+    end
+  end
+
+  defp in_dir(path, fun) do
+    previous = File.cwd!()
+
+    try do
+      File.cd!(path)
+      fun.()
+    after
+      File.cd!(previous)
+    end
   end
 
   defp restore_app_env(key, nil), do: Application.delete_env(:review, key)
