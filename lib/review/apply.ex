@@ -157,7 +157,7 @@ defmodule Review.Apply do
           review_path
           |> affected_files_from_review()
           |> then(&[source_file | &1])
-          |> Enum.map(&normalize_affected_path(root, &1))
+          |> Enum.map(&normalize_affected_path!(root, relative_review, &1))
           |> Enum.reject(&(&1 == ""))
           |> Enum.uniq()
           |> Enum.sort()
@@ -252,7 +252,7 @@ defmodule Review.Apply do
     |> String.trim()
   end
 
-  defp normalize_affected_path(root, path) do
+  defp normalize_affected_path!(root, relative_review, path) do
     path =
       path
       |> String.trim()
@@ -263,7 +263,12 @@ defmodule Review.Apply do
     if under_repo_root?(root, expanded) do
       Path.relative_to(expanded, root)
     else
-      path
+      abort("""
+      Affected file escapes the repository root for #{relative_review}: #{path}
+
+      `mix review.apply` can only apply and commit changes inside #{root}.
+      Run it from the repository that owns this path, or split this review so every affected file is inside the current checkout.
+      """)
     end
   end
 
@@ -1467,44 +1472,49 @@ defmodule Review.Apply do
   end
 
   defp apply_prompt_template(relative_review, source_file, language_guidance) do
+    language_guidance = String.trim(language_guidance)
+
     """
-    Use the improve-codebase-architecture skill.
-    Use design-an-interface if the review depends on choosing a better API, module, or file boundary.
+    Implement the concrete cleanup recommendations in `#{relative_review}`.
+    Primary file: `#{source_file}`.
 
-    Apply the concrete refactoring and cleanup recommendations from `#{relative_review}`.
-    The primary source file is `#{source_file}`.
+    Success criteria:
+    - Read the review and directly relevant code before editing.
+    - Keep the change focused on the review; leave unrelated dirty files and unrelated refactors alone.
+    - Prefer the smallest cohesive refactor that satisfies the recommendation.
+    - Move, rename, create, or delete files only when the review calls for structural cleanup or it clearly reduces coupling.
+    - If a recommendation is stale, unsafe, or no longer applies, do not force it; explain why in the final response.
+    - Add or update focused tests when behavior changes, and run the narrow relevant checks you can.
 
-    Instructions:
-    - Read the review markdown and the relevant code before editing.
-    - Keep changes focused on recommendations from the review.
-    - You may move, rename, create, or delete files when the review calls for a clearer module or directory structure.
+    Tooling and local rules:
+    - Use the improve-codebase-architecture skill.
+    - Use design-an-interface only if the review depends on choosing a better API, module, or file boundary.
     #{language_guidance}
-    - Run the narrow relevant tests or checks you can.
-    - Add or update focused tests when behavior changes.
-    - If a recommendation no longer applies, leave it unchanged and explain why in the final response.
+
+    Safety:
     - Do not run git add, git commit, or delete the review markdown. The script will review, delete, stage, and commit after you finish.
     """
-    |> String.replace("    #{language_guidance}", String.trim_trailing(language_guidance))
   end
 
   defp review_fix_prompt(relative_review, source_file) do
     """
-    Review the working tree changes against `#{relative_review}`.
-    The primary source file is `#{source_file}`.
+    Perform a read-only gate review of the current working tree against `#{relative_review}`.
+    Primary file: `#{source_file}`.
 
-    Instructions:
+    Decision criteria:
     - Do not edit files.
     - Read the review markdown and inspect the working tree diff.
-    - Confirm the fix implements the concrete recommendations from the review.
-    - Confirm any changed behavior has focused tests or a clear verification path.
+    - Approve only if the diff implements the review's concrete recommendations without unsafe scope creep.
+    - Require focused tests or a clear verification path for changed behavior.
     - Ignore unrelated pre-existing dirty files that are not part of this review.
+    - Reject stale, partial, risky, or unverified fixes with specific blocking issues.
 
-    Output rules:
+    Output:
     - If the fix satisfies the review, output exactly:
     #{@fix_approved}
-    - If the fix is incomplete or unsafe, output markdown starting with:
+    - Otherwise output markdown starting with:
     FIX_REJECTED
-    - After FIX_REJECTED, list the blocking issues the fixing agent must address.
+    - After FIX_REJECTED, list only the blocking issues the fixing agent must address.
     """
   end
 
