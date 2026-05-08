@@ -34,11 +34,11 @@ defmodule Review.Apply.ReviewSet do
     end
   end
 
-  def build_job(root, target, source_blacklist, review_path) do
+  def build_job(root, target, source_policy, review_path) do
     relative_review = Path.relative_to(review_path, root)
     source_file = source_from_review(root, review_path, target)
 
-    case validate_source_file(root, source_blacklist, relative_review, source_file) do
+    case validate_source_file(root, source_policy, relative_review, source_file) do
       :ok ->
         case affected_files_for_review(root, relative_review, review_path, source_file) do
           {:ok, affected_files} ->
@@ -231,7 +231,7 @@ defmodule Review.Apply.ReviewSet do
 
   defp fallback_source_from_path(source_file, _root, _review_path, _target), do: source_file
 
-  def validate_source_file(root, source_blacklist, relative_review, source_file) do
+  def validate_source_file(root, source_policy, relative_review, source_file) do
     absolute_source = Path.expand(source_file, root)
 
     if source_file == "" do
@@ -242,13 +242,12 @@ defmodule Review.Apply.ReviewSet do
       abort("Expected source file under #{root} for #{relative_review}: #{source_file}")
     end
 
-    if SourcePolicy.blacklisted_path?(root, absolute_source, source_blacklist) do
-      abort(
-        "Source file is under a blacklisted folder (#{SourcePolicy.format_source_blacklist(source_blacklist)}) for #{relative_review}: #{source_file}"
-      )
+    unless SourcePolicy.allowed_path?(root, absolute_source, source_policy) do
+      abort(disallowed_source_message(root, absolute_source, source_policy, relative_review))
     end
 
-    if File.regular?(absolute_source) and SourcePolicy.source_file_extension?(absolute_source) do
+    if File.regular?(absolute_source) and
+         SourcePolicy.source_file_extension?(absolute_source, source_policy) do
       :ok
     else
       {:stale, stale_source_message(relative_review, source_file)}
@@ -257,5 +256,17 @@ defmodule Review.Apply.ReviewSet do
 
   defp abort(message) do
     raise Review.Error, message
+  end
+
+  defp disallowed_source_message(root, absolute_source, source_policy, relative_review) do
+    source_file = Path.relative_to(absolute_source, root)
+
+    case SourcePolicy.exclusion_reason(root, absolute_source, source_policy) do
+      {:blacklisted, blacklist} ->
+        "Source file is under a blacklisted folder (#{SourcePolicy.format_source_blacklist(blacklist)}) for #{relative_review}: #{source_file}"
+
+      {:outside_source_dirs, source_dirs} ->
+        "Source file is outside configured source_dirs (#{SourcePolicy.format_source_dirs(source_dirs)}) for #{relative_review}: #{source_file}"
+    end
   end
 end

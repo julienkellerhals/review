@@ -4,22 +4,24 @@ defmodule Review.Apply.Worktree do
   alias Review.Apply.Git
 
   def apply!(root, target, job, base_head, apply_review) do
+    repo_root = Git.repo_root!(root)
     branch = branch_name(job.relative_review)
     worktree = path(root, job.relative_review)
+    worktree_root = profile_root_in_worktree(repo_root, root, worktree)
 
     try do
       IO.puts("Starting #{job.relative_review} in #{worktree}")
       Git.run!(root, ["worktree", "add", "-b", branch, worktree, base_head], "create worktree")
-      sync_current_checkout_to_worktree!(root, worktree)
-      copy_review_to_worktree!(root, worktree, job.relative_review)
+      sync_current_checkout_to_worktree!(root, worktree_root)
+      copy_review_to_worktree!(root, worktree_root, job.relative_review)
 
       worktree_target =
         target
         |> Path.relative_to(root)
-        |> then(&Path.join(worktree, &1))
+        |> then(&Path.join(worktree_root, &1))
 
-      worktree_review = Path.join(worktree, job.relative_review)
-      status = apply_review.(worktree, worktree_target, worktree_review)
+      worktree_review = Path.join(worktree_root, job.relative_review)
+      status = apply_review.(worktree_root, worktree_target, worktree_review)
 
       if status == :deferred and File.exists?(worktree_review) do
         File.mkdir_p!(Path.dirname(job.review_path))
@@ -96,6 +98,15 @@ defmodule Review.Apply.Worktree do
 
   defp unique_suffix do
     "#{System.os_time(:millisecond)}-#{System.unique_integer([:positive, :monotonic])}"
+  end
+
+  defp profile_root_in_worktree(repo_root, root, worktree) do
+    root
+    |> Path.relative_to(repo_root)
+    |> case do
+      "." -> worktree
+      relative_root -> Path.join(worktree, relative_root)
+    end
   end
 
   defp sync_current_checkout_to_worktree!(root, worktree) do

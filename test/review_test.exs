@@ -174,6 +174,127 @@ defmodule ReviewTest do
     end
   end
 
+  test "profile-root parallel apply runs inside the matching worktree subdirectory" do
+    repo_root = tmp_dir("profile-worktree-apply")
+    bin_dir = tmp_dir("fake-codex-profile-bin")
+    codex_path = Path.join(bin_dir, "codex")
+
+    run!(repo_root, "git", ["init"])
+    run!(repo_root, "git", ["config", "user.email", "test@example.com"])
+    run!(repo_root, "git", ["config", "user.name", "Test"])
+    write_file!(repo_root, "apps/one/lib/a.ex")
+    write_file!(repo_root, "apps/one/lib/b.ex")
+    run!(repo_root, "git", ["add", "apps/one/lib/a.ex", "apps/one/lib/b.ex"])
+    run!(repo_root, "git", ["commit", "-m", "init"])
+
+    File.mkdir_p!(bin_dir)
+
+    File.write!(codex_path, """
+    #!/bin/sh
+    root=""
+    output=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --cd)
+          shift
+          root="$1"
+          ;;
+        --output-last-message)
+          shift
+          output="$1"
+          ;;
+      esac
+
+      shift
+    done
+
+    prompt=$(cat)
+
+    if [ -z "$output" ]; then
+      if printf '%s' "$prompt" | grep -q "lib/a.ex"; then
+        printf 'a review\\n' > "$root/lib/a_review.ex"
+      else
+        printf 'b review\\n' > "$root/lib/b_review.ex"
+      fi
+
+      exit 0
+    fi
+
+    if printf '%s' "$prompt" | grep -q "Generate a git commit subject"; then
+      printf 'Apply profile review\\n' > "$output"
+    else
+      printf 'FIX_APPROVED\\n' > "$output"
+    fi
+    """)
+
+    File.chmod!(codex_path, 0o755)
+
+    write_file!(
+      repo_root,
+      "apps/one/review/lib/a.ex/review.md",
+      """
+      # Review: lib/a.ex
+      Source file: `lib/a.ex`
+      Affected files:
+      - `lib/a.ex`
+      - `lib/a_review.ex`
+
+      ## Overview
+      Add generated review file.
+      """
+    )
+
+    write_file!(
+      repo_root,
+      "apps/one/review/lib/b.ex/review.md",
+      """
+      # Review: lib/b.ex
+      Source file: `lib/b.ex`
+      Affected files:
+      - `lib/b.ex`
+      - `lib/b_review.ex`
+
+      ## Overview
+      Add generated review file.
+      """
+    )
+
+    previous_path = System.get_env("PATH")
+    previous_profiles = Application.get_env(:review, :profiles)
+    previous_attempts = System.get_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS")
+
+    try do
+      System.put_env("PATH", bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS", "1")
+
+      Application.put_env(:review, :profiles,
+        one: [
+          root: "apps/one",
+          review_dir: "review",
+          source_dirs: ["lib"],
+          source_dirs_mode: :whitelist,
+          source_file_extensions: [".ex"]
+        ]
+      )
+
+      in_dir(repo_root, fn ->
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert :ok = Review.Apply.main(["--profile", "one", "review"])
+        end)
+      end)
+
+      assert File.exists?(Path.join(repo_root, "apps/one/lib/a_review.ex"))
+      assert File.exists?(Path.join(repo_root, "apps/one/lib/b_review.ex"))
+      refute File.exists?(Path.join(repo_root, "lib/a_review.ex"))
+      refute File.exists?(Path.join(repo_root, "lib/b_review.ex"))
+    after
+      restore_env("PATH", previous_path)
+      restore_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS", previous_attempts)
+      restore_app_env(:profiles, previous_profiles)
+    end
+  end
+
   test "invalid generator input raises a review error instead of halting the VM" do
     assert_raise Review.Error, ~r/Expected a file under/, fn ->
       Review.Generate.main(["/definitely/outside/this/repo.ex"])
@@ -216,7 +337,7 @@ defmodule ReviewTest do
         root
         |> Review.Generate.discover_source_files(
           review_dir,
-          Review.Common.SourcePolicy.source_blacklist(),
+          Review.Common.SourcePolicy.source_policy(),
           Review.Common.Config.source_dirs()
         )
         |> Enum.map(&Path.relative_to(&1, root))
@@ -252,6 +373,130 @@ defmodule ReviewTest do
       assert Review.Common.Config.review_dir(root) == Path.join(root, "custom_reviews")
     after
       restore_app_env(:review_dir, previous)
+    end
+  end
+
+  test "source file extensions can be configured with application config" do
+    previous = Application.get_env(:review, :source_file_extensions)
+
+    try do
+      Application.put_env(:review, :source_file_extensions, [".mdx"])
+
+      assert Review.Common.SourcePolicy.source_file_extension?("docs/page.mdx")
+      refute Review.Common.SourcePolicy.source_file_extension?("lib/example.ex")
+    after
+      restore_app_env(:source_file_extensions, previous)
+    end
+  end
+
+  test "invalid source file extension config raises a review error" do
+    previous = Application.get_env(:review, :source_file_extensions)
+
+    try do
+      Application.put_env(:review, :source_file_extensions, ["ex"])
+
+      assert_raise Review.Error, ~r/source_file_extensions entries to start with/, fn ->
+        Review.Common.Config.source_file_extensions()
+      end
+    after
+      restore_app_env(:source_file_extensions, previous)
+    end
+  end
+
+  test "source blacklist can be configured with application config" do
+    previous_config = Application.get_env(:review, :source_blacklist)
+    previous_env = System.get_env("REVIEW_SOURCE_BLACKLIST")
+
+    try do
+      System.delete_env("REVIEW_SOURCE_BLACKLIST")
+      Application.put_env(:review, :source_blacklist, ["tmp"])
+
+      assert Review.Common.SourcePolicy.source_blacklist() == ["tmp"]
+    after
+      restore_app_env(:source_blacklist, previous_config)
+      restore_env("REVIEW_SOURCE_BLACKLIST", previous_env)
+    end
+  end
+
+  test "source blacklist environment variable overrides application config" do
+    previous_config = Application.get_env(:review, :source_blacklist)
+    previous_env = System.get_env("REVIEW_SOURCE_BLACKLIST")
+
+    try do
+      Application.put_env(:review, :source_blacklist, ["tmp"])
+      System.put_env("REVIEW_SOURCE_BLACKLIST", "deps")
+
+      assert Review.Common.SourcePolicy.source_blacklist() == ["deps"]
+    after
+      restore_app_env(:source_blacklist, previous_config)
+      restore_env("REVIEW_SOURCE_BLACKLIST", previous_env)
+    end
+  end
+
+  test "source dirs whitelist mode rejects explicit files outside configured roots" do
+    root = tmp_dir("source-dirs-whitelist")
+    previous_dirs = Application.get_env(:review, :source_dirs)
+    previous_mode = Application.get_env(:review, :source_dirs_mode)
+
+    write_file!(root, "lib/kept.ex")
+    write_file!(root, "scripts/skipped.ex")
+
+    try do
+      Application.put_env(:review, :source_dirs, ["lib"])
+      Application.put_env(:review, :source_dirs_mode, :whitelist)
+
+      in_dir(root, fn ->
+        assert_raise Review.Error, ~r/outside configured source_dirs/, fn ->
+          Review.Generate.main(["scripts/skipped.ex"])
+        end
+      end)
+    after
+      restore_app_env(:source_dirs, previous_dirs)
+      restore_app_env(:source_dirs_mode, previous_mode)
+    end
+  end
+
+  test "selected profile overrides root and source policy" do
+    repo_root = tmp_dir("profiles")
+    previous_profiles = Application.get_env(:review, :profiles)
+
+    write_file!(repo_root, "apps/one/lib/kept.ex")
+    write_file!(repo_root, "apps/one/test/kept_test.exs")
+    write_file!(repo_root, "apps/two/lib/skipped.ex")
+
+    try do
+      Application.put_env(:review, :profiles,
+        one: [
+          root: "apps/one",
+          review_dir: "reviews",
+          source_dirs: ["lib"],
+          source_dirs_mode: :whitelist,
+          source_file_extensions: [".ex"]
+        ]
+      )
+
+      in_dir(repo_root, fn ->
+        assert Review.Common.Profile.root(repo_root, "one") ==
+                 Path.join(repo_root, "apps/one")
+
+        assert_raise Review.Error, ~r/outside configured source_dirs/, fn ->
+          Review.Generate.main(["--profile", "one", "test/kept_test.exs"])
+        end
+
+        discovered =
+          repo_root
+          |> Path.join("apps/one")
+          |> Review.Generate.discover_source_files(
+            Path.join(repo_root, "apps/one/reviews"),
+            Review.Common.SourcePolicy.source_policy("one"),
+            Review.Common.Config.source_dirs("one")
+          )
+          |> Enum.map(&Path.relative_to(&1, Path.join(repo_root, "apps/one")))
+
+        assert discovered == ["lib/kept.ex"]
+      end)
+    after
+      restore_app_env(:profiles, previous_profiles)
     end
   end
 

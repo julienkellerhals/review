@@ -8,14 +8,14 @@ defmodule Review.Apply.Transaction do
   @deferred_review_start "<!-- apply-review-deferred-start -->"
   @deferred_review_end "<!-- apply-review-deferred-end -->"
 
-  def apply(root, target, source_blacklist, review_path, opts) do
+  def apply(root, target, source_policy, review_path, opts) do
     max_attempts = Keyword.fetch!(opts, :max_attempts)
     relative_review = Path.relative_to(review_path, root)
     source_file = ReviewSet.source_from_review(root, review_path, target)
     baseline_head = Lifecycle.git_head(root)
     baseline_paths = Lifecycle.changed_path_set(root)
 
-    case ReviewSet.validate_source_file(root, source_blacklist, relative_review, source_file) do
+    case ReviewSet.validate_source_file(root, source_policy, relative_review, source_file) do
       :ok ->
         case apply_until_review_approved!(
                root,

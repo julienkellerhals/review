@@ -4,7 +4,6 @@ defmodule Review.Apply do
   alias Review.Apply.Prompts
   alias Review.Apply.ReviewSet
   alias Review.Apply.Transaction
-  alias Review.Common.SourcePolicy
   @default_max_fix_attempts 3
   @default_apply_concurrency 10
 
@@ -12,22 +11,28 @@ defmodule Review.Apply do
   def main(["--help"]), do: usage()
 
   def main(args) do
-    root = Review.Common.Repo.root()
-    target = ReviewSet.target(root, args)
-    source_blacklist = SourcePolicy.source_blacklist()
+    runtime = Review.Common.Runtime.from_args!(args, mode: :apply)
+    root = runtime.root
+    target = ReviewSet.target(root, runtime.args)
+    source_policy = runtime.source_policy
     reviews = ReviewSet.files(target)
     Lifecycle.ensure_ready!(root, target)
 
-    apply_reviews!(root, target, source_blacklist, reviews)
+    apply_reviews!(root, target, source_policy, reviews)
   end
 
   defp usage do
     IO.puts("Usage: mix review.apply [review|path/to/review.md]")
+    IO.puts("       mix review.apply --profile PROFILE [review|path/to/review.md]")
 
     IO.puts("Set REVIEW_DIR to change the default review directory.")
 
     IO.puts(
       "Set REVIEW_SOURCE_BLACKLIST to comma-separated source folder names to exclude. Bare names and **/name/ both match any path segment."
+    )
+
+    IO.puts(
+      ~s(Configure default source policy with `config :review, source_dirs: ["lib"], source_dirs_mode: :whitelist, source_file_extensions: [".ex"], source_blacklist: ["deps"]`.)
     )
 
     IO.puts("Set CODEX_MODEL to override the Codex model. Defaults to gpt-5.5.")
@@ -51,11 +56,11 @@ defmodule Review.Apply do
     IO.puts("The starting checkout must be clean except for files under the review target.")
   end
 
-  defp apply_reviews!(root, target, source_blacklist, reviews) do
+  defp apply_reviews!(root, target, source_policy, reviews) do
     jobs =
       reviews
       |> Enum.flat_map(fn review_path ->
-        case ReviewSet.build_job(root, target, source_blacklist, review_path) do
+        case ReviewSet.build_job(root, target, source_policy, review_path) do
           {:ok, job} ->
             [job]
 
@@ -74,11 +79,11 @@ defmodule Review.Apply do
       IO.puts("No applicable reviews left after skipping review files")
       :ok
     else
-      apply_review_jobs!(root, target, source_blacklist, jobs)
+      apply_review_jobs!(root, target, source_policy, jobs)
     end
   end
 
-  defp apply_review_jobs!(root, target, source_blacklist, jobs) do
+  defp apply_review_jobs!(root, target, source_policy, jobs) do
     concurrency = apply_concurrency()
     batches = BatchPlanner.plan(jobs, concurrency)
 
@@ -111,7 +116,7 @@ defmodule Review.Apply do
           Transaction.apply(
             review_root,
             review_target,
-            source_blacklist,
+            source_policy,
             review_path,
             max_attempts: max_fix_attempts()
           )

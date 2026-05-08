@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Review.Generate do
 
       $ mix review.generate
       $ mix review.generate lib/my_app/example.ex
+      $ mix review.generate --profile one
 
   Environment variables such as `REVIEW_DIR`, `REVIEW_CONCURRENCY`,
   `REVIEW_SOURCE_BLACKLIST`, `CODEX_MODEL`, and `CODEX_REASONING_EFFORT` control
@@ -17,7 +18,14 @@ defmodule Mix.Tasks.Review.Generate do
 
       config :review,
         review_dir: "review",
-        source_dirs: ["lib", "test", "config"]
+        source_dirs: ["lib", "test", "config"],
+        source_dirs_mode: :discover,
+        source_file_extensions: [".ex", ".exs", ".heex"],
+        source_blacklist: [".git", "_build", "deps"]
+
+  Set `source_dirs_mode: :whitelist` to make `source_dirs` an allow-list for
+  explicit file arguments too. Define `profiles: [one: [...], two: [...]]` and
+  select one with `--profile one` for per-subproject config.
 
   Without this config, the generator searches from the repository root.
   """

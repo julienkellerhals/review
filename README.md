@@ -36,13 +36,44 @@ import Config
 
 config :review,
   review_dir: "review",
-  source_dirs: ["lib", "test", "config", "priv", "assets"]
+  source_dirs: ["lib", "test", "config", "priv", "assets"],
+  source_dirs_mode: :discover,
+  source_file_extensions: [".ex", ".exs", ".heex", ".js", ".ts"],
+  source_blacklist: [".git", "_build", "deps", "node_modules"]
 ```
 
 `review_dir` controls where markdown files are written. `source_dirs` entries
-must be repo-relative directories or files. Explicit file arguments passed to
-`mix review.generate path/to/file.ex` are still honored even when they are
-outside the configured default discovery roots.
+must be repo-relative directories or files. With the default
+`source_dirs_mode: :discover`, they only control default discovery; explicit file
+arguments can still point outside those roots. With
+`source_dirs_mode: :whitelist`, they also become an allow-list for explicit
+generation and apply validation. `source_file_extensions` controls which file
+extensions are reviewable. `source_blacklist` controls ignored folder names;
+`REVIEW_SOURCE_BLACKLIST` can still override it for one run.
+
+Profiles let one repository hold different review configs for subprojects:
+
+```elixir
+config :review,
+  profiles: [
+    one: [
+      root: "apps/one",
+      review_dir: "reviews",
+      source_dirs: ["lib", "test"],
+      source_dirs_mode: :whitelist
+    ],
+    two: [
+      root: "apps/two",
+      review_dir: "reviews",
+      source_dirs: ["src"],
+      source_file_extensions: [".py"]
+    ]
+  ]
+```
+
+Select a profile with `--profile one`. Without `--profile`, the tasks use a
+`:default` profile when configured, otherwise the top-level `config :review`
+values.
 
 ## Optional Review Tooling
 

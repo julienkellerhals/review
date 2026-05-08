@@ -27,10 +27,18 @@ defmodule Review.Apply.Git do
     |> Path.expand(root)
   end
 
+  def repo_root!(root) do
+    root
+    |> output!(["rev-parse", "--show-toplevel"], "read repository root")
+    |> String.trim()
+    |> Path.expand()
+  end
+
   def changed_path_set(root) do
     root
     |> output!(["status", "--porcelain=v1", "-z", "--untracked-files=all"], "read git status")
     |> parse_status_entries()
+    |> Enum.map(&path_relative_to_checkout_root(root, &1))
     |> MapSet.new()
   end
 
@@ -38,6 +46,7 @@ defmodule Review.Apply.Git do
     root
     |> output!(["diff", "--cached", "--name-only", "-z"], "read staged paths")
     |> String.split(<<0>>, trim: true)
+    |> Enum.map(&path_relative_to_checkout_root(root, &1))
     |> MapSet.new()
   end
 
@@ -45,6 +54,7 @@ defmodule Review.Apply.Git do
     root
     |> output!(["ls-files", "--others", "--exclude-standard", "-z"], "read untracked paths")
     |> String.split(<<0>>, trim: true)
+    |> Enum.map(&path_relative_to_checkout_root(root, &1))
     |> MapSet.new()
   end
 
@@ -123,6 +133,14 @@ defmodule Review.Apply.Git do
   end
 
   defp rename_or_copy_status?(_entry), do: false
+
+  defp path_relative_to_checkout_root(root, path) do
+    root
+    |> repo_root!()
+    |> Path.join(path)
+    |> Path.expand()
+    |> Path.relative_to(root)
+  end
 
   defp abort(message) do
     raise Review.Error, message
