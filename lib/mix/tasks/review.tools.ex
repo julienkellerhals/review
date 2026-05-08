@@ -17,14 +17,14 @@ defmodule Mix.Tasks.Review.Tools do
 
   @impl Mix.Task
   def run(["--install"]) do
-    Review.Tooling.report_install()
+    Review.Tools.Tooling.report_install()
   end
 
   def run(["-h"]), do: Mix.shell().info(@moduledoc)
   def run(["--help"]), do: Mix.shell().info(@moduledoc)
 
   def run([]) do
-    Review.Tooling.report()
+    Review.Tools.Tooling.report()
   end
 
   def run(args) do

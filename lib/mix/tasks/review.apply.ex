@@ -10,9 +10,9 @@ defmodule Mix.Tasks.Review.Apply do
       $ mix review.apply review/path/to/review.md
 
   Environment variables such as `REVIEW_DIR`, `REVIEW_SOURCE_BLACKLIST`,
-  `CODEX_MODEL`, `CODEX_REASONING_EFFORT`, `CODEX_FIX_REVIEW_MAX_ATTEMPTS`,
-  `CODEX_COMMAND_MAX_ATTEMPTS`, and `CODEX_APPLY_CONCURRENCY` control the apply
-  run.
+  `CODEX_MODEL`, `CODEX_APPLY_REASONING_EFFORT`, `CODEX_REVIEW_REASONING_EFFORT`,
+  `CODEX_FIX_REVIEW_MAX_ATTEMPTS`, `CODEX_COMMAND_MAX_ATTEMPTS`, and
+  `CODEX_APPLY_CONCURRENCY` control the apply run.
   """
 
   @impl Mix.Task

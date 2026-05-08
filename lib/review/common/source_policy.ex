@@ -1,4 +1,4 @@
-defmodule Review.SourcePolicy do
+defmodule Review.Common.SourcePolicy do
   @moduledoc false
 
   @source_file_extensions [

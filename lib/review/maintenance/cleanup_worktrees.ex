@@ -1,9 +1,9 @@
-defmodule Review.CleanupWorktrees do
+defmodule Review.Maintenance.CleanupWorktrees do
   def main(["-h"]), do: usage()
   def main(["--help"]), do: usage()
 
   def main(_args) do
-    root = repo_root()
+    root = Review.Common.Repo.root!()
     worktrees = linked_worktrees(root)
 
     case worktrees do
@@ -31,18 +31,6 @@ defmodule Review.CleanupWorktrees do
     IO.puts("Usage: mix review.cleanup_worktrees")
     IO.puts("Removes every linked git worktree for this repository except the current checkout.")
     IO.puts("Also runs `git worktree prune` afterward.")
-  end
-
-  defp repo_root do
-    case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
-      {root, 0} ->
-        root
-        |> String.trim()
-        |> Path.expand()
-
-      {output, status} ->
-        abort("Failed to locate repository root; git exited with #{status}:\n#{output}")
-    end
   end
 
   defp linked_worktrees(root) do

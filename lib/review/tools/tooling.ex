@@ -1,16 +1,16 @@
-defmodule Review.Tooling do
+defmodule Review.Tools.Tooling do
   @moduledoc false
 
   @skip_values ["0", "false", "no", "off"]
 
-  def report(root \\ repo_root()) do
+  def report(root \\ Review.Common.Repo.root()) do
     root
     |> status()
     |> format()
     |> IO.puts()
   end
 
-  def report_install(root \\ repo_root()) do
+  def report_install(root \\ Review.Common.Repo.root()) do
     root
     |> install_instructions(detect_os())
     |> IO.puts()
@@ -22,7 +22,7 @@ defmodule Review.Tooling do
     end
   end
 
-  def status(root \\ repo_root()) do
+  def status(root \\ Review.Common.Repo.root()) do
     root = Path.expand(root)
 
     [
@@ -42,7 +42,7 @@ defmodule Review.Tooling do
     ]
   end
 
-  def prompt_guidance(root \\ repo_root()) do
+  def prompt_guidance(root \\ Review.Common.Repo.root()) do
     root = Path.expand(root)
 
     [
@@ -64,7 +64,7 @@ defmodule Review.Tooling do
     Enum.join(["Optional review tooling:" | lines], "\n")
   end
 
-  def install_instructions(root \\ repo_root(), os_info \\ detect_os()) do
+  def install_instructions(root \\ Review.Common.Repo.root(), os_info \\ detect_os()) do
     root = Path.expand(root)
     os_label = os_info[:pretty_name] || os_info[:id] || :os.type() |> elem(0) |> Atom.to_string()
 
@@ -409,11 +409,4 @@ defmodule Review.Tooling do
   defp format_status(:partial), do: "partial"
   defp format_status(:not_applicable), do: "not applicable"
   defp format_status(:missing), do: "missing"
-
-  defp repo_root do
-    case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
-      {root, 0} -> root |> String.trim() |> Path.expand()
-      _ -> File.cwd!()
-    end
-  end
 end

@@ -1,4 +1,4 @@
-defmodule Review.Config do
+defmodule Review.Common.Config do
   @moduledoc false
 
   @default_review_dir "review"

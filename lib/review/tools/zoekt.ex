@@ -1,7 +1,7 @@
-defmodule Review.Zoekt do
+defmodule Review.Tools.Zoekt do
   @moduledoc false
 
-  def index(args \\ [], root \\ repo_root()) do
+  def index(args \\ [], root \\ Review.Common.Repo.root()) do
     {options, rest} = parse_args(args)
 
     if rest != [] do
@@ -84,13 +84,6 @@ defmodule Review.Zoekt do
     System.find_executable("zoekt-git-index") ||
       raise Review.Error,
             "Expected zoekt-git-index on PATH. Run `mix review.tools --install` for setup notes."
-  end
-
-  defp repo_root do
-    case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
-      {root, 0} -> root |> String.trim() |> Path.expand()
-      _ -> File.cwd!()
-    end
   end
 
   defp shell_quote(value) do

@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Review.Zoekt.Index do
 
   @impl Mix.Task
   def run(args) do
-    Review.Zoekt.index(args)
+    Review.Tools.Zoekt.index(args)
   rescue
     exception in [Review.Error] ->
       Mix.raise(Exception.message(exception))

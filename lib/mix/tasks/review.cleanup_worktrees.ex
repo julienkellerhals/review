@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Review.CleanupWorktrees do
 
   @impl Mix.Task
   def run(args) do
-    run_review_task(fn -> Review.CleanupWorktrees.main(args) end)
+    run_review_task(fn -> Review.Maintenance.CleanupWorktrees.main(args) end)
   end
 
   defp run_review_task(fun) do

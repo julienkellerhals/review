@@ -85,6 +85,7 @@ defmodule ReviewTest do
 
     File.write!(codex_path, """
     #!/bin/sh
+    args="$*"
     root=""
     output=""
 
@@ -104,6 +105,7 @@ defmodule ReviewTest do
     done
 
     prompt=$(cat)
+    printf '%s\\n' "$args" >> "$root/codex_args.log"
 
     if [ -z "$output" ]; then
       mkdir -p "$root/lib"
@@ -159,6 +161,10 @@ defmodule ReviewTest do
       assert File.exists?(Path.join(root, "lib/new_test.ex"))
       refute File.exists?(Path.join(root, "review/lib/source.ex/review.md"))
 
+      codex_args = File.read!(Path.join(root, "codex_args.log"))
+      assert codex_args =~ "model_reasoning_effort=low"
+      assert codex_args =~ "model_reasoning_effort=medium"
+
       assert root
              |> git_output!(["show", "--name-only", "--format=%s", "HEAD"])
              |> String.contains?("lib/new_test.ex")
@@ -181,7 +187,7 @@ defmodule ReviewTest do
       System.put_env("REVIEW_SOURCE_BLACKLIST", "valid,invalid/path")
 
       assert_raise Review.Error, ~r/Expected blacklist entry/, fn ->
-        Review.SourcePolicy.source_blacklist()
+        Review.Common.SourcePolicy.source_blacklist()
       end
     after
       if previous do
@@ -210,8 +216,8 @@ defmodule ReviewTest do
         root
         |> Review.Generate.discover_source_files(
           review_dir,
-          Review.SourcePolicy.source_blacklist(),
-          Review.Config.source_dirs()
+          Review.Common.SourcePolicy.source_blacklist(),
+          Review.Common.Config.source_dirs()
         )
         |> Enum.map(&Path.relative_to(&1, root))
         |> Enum.sort()
@@ -229,7 +235,7 @@ defmodule ReviewTest do
       Application.put_env(:review, :source_dirs, [123])
 
       assert_raise Review.Error, ~r/source_dirs entries/, fn ->
-        Review.Config.source_dirs()
+        Review.Common.Config.source_dirs()
       end
     after
       restore_app_env(:source_dirs, previous)
@@ -243,7 +249,7 @@ defmodule ReviewTest do
     try do
       Application.put_env(:review, :review_dir, "custom_reviews")
 
-      assert Review.Config.review_dir(root) == Path.join(root, "custom_reviews")
+      assert Review.Common.Config.review_dir(root) == Path.join(root, "custom_reviews")
     after
       restore_app_env(:review_dir, previous)
     end
@@ -257,12 +263,12 @@ defmodule ReviewTest do
 
     plain_xref =
       plain_root
-      |> Review.Tooling.status()
+      |> Review.Tools.Tooling.status()
       |> Enum.find(&(&1.name == "mix xref"))
 
     elixir_xref =
       elixir_root
-      |> Review.Tooling.status()
+      |> Review.Tools.Tooling.status()
       |> Enum.find(&(&1.name == "mix xref"))
 
     assert plain_xref.status == :not_applicable
@@ -275,7 +281,7 @@ defmodule ReviewTest do
 
     xref =
       root
-      |> Review.Tooling.status()
+      |> Review.Tools.Tooling.status()
       |> Enum.find(&(&1.name == "mix xref"))
 
     assert xref.status == :not_applicable
@@ -288,7 +294,7 @@ defmodule ReviewTest do
     write_file!(root, "lib/example.ex")
     write_file!(root, "scip.json", "{}")
 
-    guidance = Review.Tooling.prompt_guidance(root)
+    guidance = Review.Tools.Tooling.prompt_guidance(root)
 
     assert guidance =~ "Elixir source: yes; mix project: yes"
 
@@ -319,7 +325,7 @@ defmodule ReviewTest do
     root = tmp_dir("tooling-install")
 
     instructions =
-      Review.Tooling.install_instructions(root, %{
+      Review.Tools.Tooling.install_instructions(root, %{
         id: "fedora",
         pretty_name: "Fedora Linux 44"
       })
@@ -335,7 +341,7 @@ defmodule ReviewTest do
 
   test "zoekt index rejects invalid modes before running external tools" do
     assert_raise Review.Error, ~r/Expected --mode to be working-tree or git/, fn ->
-      Review.Zoekt.index(["--mode", "server"], tmp_dir("zoekt-mode"))
+      Review.Tools.Zoekt.index(["--mode", "server"], tmp_dir("zoekt-mode"))
     end
   end
 
