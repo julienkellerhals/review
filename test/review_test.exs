@@ -22,7 +22,7 @@ defmodule ReviewTest do
     assert second.relative_review == "two/review.md"
   end
 
-  test "apply rejects reviews that affect files outside the current repo" do
+  test "apply skips reviews that affect files outside the current repo" do
     root = tmp_dir("outside-affected-files")
 
     run!(root, "git", ["init"])
@@ -55,9 +55,16 @@ defmodule ReviewTest do
     )
 
     in_dir(root, fn ->
-      assert_raise Review.Error, ~r/Affected file escapes the repository root/, fn ->
-        Review.Apply.main(["review"])
-      end
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert :ok = Review.Apply.main(["review"])
+        end)
+
+      assert output =~
+               "Affected file escapes the repository root for review/lib/foo.ex/review.md: ../sibling/bar.ex"
+
+      assert output =~ "No applicable reviews left after skipping review files"
+      assert File.exists?(Path.join(root, "review/lib/foo.ex/review.md"))
     end)
   end
 

@@ -104,11 +104,12 @@ defmodule Review.Apply do
         case review_job(root, target, source_blacklist, review_path) do
           {:ok, job} -> [job]
           :skipped_stale -> []
+          :skipped_invalid_affected_file -> []
         end
       end)
 
     if jobs == [] do
-      IO.puts("No applicable reviews left after skipping stale review files")
+      IO.puts("No applicable reviews left after skipping review files")
       :ok
     else
       apply_review_jobs!(root, target, source_blacklist, jobs)
@@ -153,26 +154,50 @@ defmodule Review.Apply do
 
     case validate_source_file(root, source_blacklist, relative_review, source_file) do
       :ok ->
-        affected_files =
-          review_path
-          |> affected_files_from_review()
-          |> then(&[source_file | &1])
-          |> Enum.map(&normalize_affected_path!(root, relative_review, &1))
-          |> Enum.reject(&(&1 == ""))
-          |> Enum.uniq()
-          |> Enum.sort()
+        case affected_files_for_review(root, relative_review, review_path, source_file) do
+          {:ok, affected_files} ->
+            {:ok,
+             %{
+               review_path: review_path,
+               relative_review: relative_review,
+               source_file: source_file,
+               affected_files: affected_files
+             }}
 
-        {:ok,
-         %{
-           review_path: review_path,
-           relative_review: relative_review,
-           source_file: source_file,
-           affected_files: affected_files
-         }}
+          {:skip, message} ->
+            IO.puts(message)
+            :skipped_invalid_affected_file
+        end
 
       {:stale, message} ->
         skip_stale_review!(root, review_path, relative_review, source_file, message)
         :skipped_stale
+    end
+  end
+
+  defp affected_files_for_review(root, relative_review, review_path, source_file) do
+    review_path
+    |> affected_files_from_review()
+    |> then(&[source_file | &1])
+    |> Enum.reduce_while({:ok, []}, fn path, {:ok, files} ->
+      case normalize_affected_path(root, relative_review, path) do
+        {:ok, file} -> {:cont, {:ok, [file | files]}}
+        {:skip, message} -> {:halt, {:skip, message}}
+      end
+    end)
+    |> case do
+      {:ok, files} ->
+        affected_files =
+          files
+          |> Enum.reverse()
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        {:ok, affected_files}
+
+      {:skip, message} ->
+        {:skip, message}
     end
   end
 
@@ -252,7 +277,7 @@ defmodule Review.Apply do
     |> String.trim()
   end
 
-  defp normalize_affected_path!(root, relative_review, path) do
+  defp normalize_affected_path(root, relative_review, path) do
     path =
       path
       |> String.trim()
@@ -261,14 +286,15 @@ defmodule Review.Apply do
     expanded = Path.expand(path, root)
 
     if under_repo_root?(root, expanded) do
-      Path.relative_to(expanded, root)
+      {:ok, Path.relative_to(expanded, root)}
     else
-      abort("""
-      Affected file escapes the repository root for #{relative_review}: #{path}
+      {:skip,
+       """
+       Affected file escapes the repository root for #{relative_review}: #{path}
 
-      `mix review.apply` can only apply and commit changes inside #{root}.
-      Run it from the repository that owns this path, or split this review so every affected file is inside the current checkout.
-      """)
+       `mix review.apply` can only apply and commit changes inside #{root}.
+       Run it from the repository that owns this path, or split this review so every affected file is inside the current checkout.
+       """}
     end
   end
 
