@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Review.Generate do
 
   Environment variables such as `REVIEW_DIR`, `REVIEW_CONCURRENCY`,
   `REVIEW_SOURCE_BLACKLIST`, `CODEX_MODEL`, and `CODEX_REASONING_EFFORT` control
-  the review run.
+  the review run. Set `REVIEW_TOOL_CHECK=0` to skip optional tooling checks.
 
   Configure default discovery roots in the consuming project's `config/config.exs`:
 

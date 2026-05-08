@@ -796,6 +796,7 @@ defmodule Review.Apply do
                relative_review,
                source_file,
                baseline_head,
+               baseline_paths,
                max_attempts
              ) do
           :approved ->
@@ -1055,6 +1056,7 @@ defmodule Review.Apply do
          relative_review,
          source_file,
          baseline_head,
+         baseline_paths,
          max_attempts
        ) do
     1..max_attempts
@@ -1074,7 +1076,7 @@ defmodule Review.Apply do
 
       ensure_head_unchanged!(root, baseline_head, relative_review)
 
-      case review_fix_result!(root, relative_review, source_file) do
+      case review_fix_result!(root, relative_review, source_file, baseline_paths) do
         :approved ->
           {:halt, :approved}
 
@@ -1093,10 +1095,11 @@ defmodule Review.Apply do
     end)
   end
 
-  defp review_fix_result!(root, relative_review, source_file) do
+  defp review_fix_result!(root, relative_review, source_file, baseline_paths) do
     output_path = tmp_markdown_path("codex-fix-review")
 
     IO.puts("Reviewing fix against #{relative_review}")
+    expose_new_untracked_files_to_diff!(root, baseline_paths, relative_review)
 
     case run_codex(
            codex_read_only_args(root, output_path),
@@ -1114,6 +1117,24 @@ defmodule Review.Apply do
       {_, status} ->
         File.rm(output_path)
         abort("Failed reviewing fix for #{relative_review}; codex exited with #{status}")
+    end
+  end
+
+  defp expose_new_untracked_files_to_diff!(root, baseline_paths, relative_review) do
+    new_untracked_paths =
+      root
+      |> changed_path_set()
+      |> MapSet.difference(baseline_paths)
+      |> MapSet.intersection(untracked_path_set(root))
+      |> MapSet.to_list()
+      |> Enum.sort()
+
+    if new_untracked_paths != [] do
+      run_git!(
+        root,
+        ["add", "-N", "--" | new_untracked_paths],
+        "mark new files for fix review of #{relative_review}"
+      )
     end
   end
 
@@ -1394,6 +1415,13 @@ defmodule Review.Apply do
   defp staged_path_set(root) do
     root
     |> git_output!(["diff", "--cached", "--name-only", "-z"], "read staged paths")
+    |> String.split(<<0>>, trim: true)
+    |> MapSet.new()
+  end
+
+  defp untracked_path_set(root) do
+    root
+    |> git_output!(["ls-files", "--others", "--exclude-standard", "-z"], "read untracked paths")
     |> String.split(<<0>>, trim: true)
     |> MapSet.new()
   end

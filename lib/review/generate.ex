@@ -15,9 +15,10 @@ defmodule Review.Generate do
     source_dirs = Review.Config.source_dirs()
     File.mkdir_p!(review_dir)
 
-    root
-    |> files_to_review(args, review_dir, source_blacklist, source_dirs)
-    |> review_files(root, review_dir, concurrency)
+    files = files_to_review(root, args, review_dir, source_blacklist, source_dirs)
+    Review.Tooling.maybe_report(root)
+
+    review_files(files, root, review_dir, concurrency)
   end
 
   defp usage do
@@ -230,7 +231,7 @@ defmodule Review.Generate do
 
   defp run_review(root, review_path, relative_source) do
     tmp_path = tmp_path("codex-review", "md")
-    prompt = review_prompt(relative_source)
+    prompt = review_prompt(relative_source, Review.Tooling.prompt_guidance(root))
 
     IO.puts("Reviewing #{relative_source}")
 
@@ -313,10 +314,12 @@ defmodule Review.Generate do
     IO.puts(:stderr, output)
   end
 
-  defp review_prompt(relative_source) do
+  defp review_prompt(relative_source, tooling_guidance) do
     """
     Review `#{relative_source}` for high-value maintenance cleanup after iterative AI coding.
     Do not edit files.
+
+    #{tooling_guidance}
 
     Outcome:
     - Exhaustively report every high-confidence actionable finding inside the review scope.
@@ -334,8 +337,13 @@ defmodule Review.Generate do
     Tooling:
     - Use the improve-codebase-architecture skill to identify shallow modules, tight coupling, duplicated orchestration, and better boundaries.
     - Use the design-an-interface skill only when the recommendation depends on choosing between API, module, or file-boundary options.
+    - Use the zoekt-code-search skill when indexed source search is available and broader reference or duplicate-pattern search would help.
+    - Use the ast-grep-code-search skill when syntax-aware search would find structural duplicates or API usage more reliably than text search.
+    - Use the elixir-xref-navigation skill in Elixir projects when dependency direction, callers, or compile/runtime coupling matter.
+    - Use the scip-code-intelligence skill when a repo-local SCIP index or query tool is already available for precise definitions and references.
     - Use AGENTS.md and relevant language/framework docs only if this file touches those layers.
     - Mention use-igniter in the recommendation or verification when a mechanical Elixir rename, move, or removal would be safer than hand edits.
+    - Treat search, xref, and index output as navigation evidence; read the relevant files before making findings.
 
     Markdown output:
     - Output markdown only unless returning NO_ACTIONABLE_REVIEW.
