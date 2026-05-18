@@ -4,12 +4,14 @@ defmodule Review.Apply.Transaction do
   alias Review.Apply.Codex
   alias Review.Apply.Lifecycle
   alias Review.Apply.ReviewSet
+  alias Review.Apply.Terminal
 
   @deferred_review_start "<!-- apply-review-deferred-start -->"
   @deferred_review_end "<!-- apply-review-deferred-end -->"
 
   def apply(root, target, source_policy, review_path, opts) do
     max_attempts = Keyword.fetch!(opts, :max_attempts)
+    mode = Keyword.get(opts, :mode, :commit)
     relative_review = Path.relative_to(review_path, root)
     source_file = ReviewSet.source_from_review(root, review_path, target)
     baseline_head = Lifecycle.git_head(root)
@@ -34,7 +36,8 @@ defmodule Review.Apply.Transaction do
               paths,
               root,
               relative_review,
-              fn -> Codex.commit_message(root, relative_review, source_file) end
+              fn -> Codex.commit_message(root, relative_review, source_file) end,
+              mode: mode
             )
 
             :approved
@@ -53,22 +56,26 @@ defmodule Review.Apply.Transaction do
         end
 
       {:stale, message} ->
-        skip_stale(root, review_path, relative_review, source_file, message)
+        skip_stale(root, review_path, relative_review, source_file, message, mode: mode)
         :skipped_stale
     end
   end
 
-  def skip_stale(root, review_path, relative_review, source_file, message) do
+  def skip_stale(root, review_path, relative_review, source_file, message, opts \\ []) do
+    mode = Keyword.get(opts, :mode, :commit)
     baseline_paths = Lifecycle.changed_path_set(root)
-    IO.puts("Skipping stale review #{relative_review}: #{source_file}")
-    IO.puts(message)
+    Terminal.stale(relative_review, source_file, message)
     delete_review!(review_path, relative_review)
 
     paths = Lifecycle.commit_paths(root, baseline_paths, [relative_review])
 
-    Lifecycle.commit_review_changes!(paths, root, relative_review, fn ->
-      "Remove stale review"
-    end)
+    Lifecycle.commit_review_changes!(
+      paths,
+      root,
+      relative_review,
+      fn ->
+        "Remove stale review"
+      end, mode: mode)
   end
 
   defp apply_until_review_approved!(
@@ -82,9 +89,9 @@ defmodule Review.Apply.Transaction do
     1..max_attempts
     |> Enum.reduce_while(nil, fn attempt, previous_rejection ->
       if attempt == 1 do
-        IO.puts("Applying #{relative_review}")
+        Terminal.review_start(relative_review)
       else
-        IO.puts("Re-applying #{relative_review} after fix review rejection")
+        Terminal.review_retry(relative_review)
       end
 
       Codex.apply_review(root, relative_review, source_file, previous_rejection)
@@ -96,22 +103,19 @@ defmodule Review.Apply.Transaction do
           {:halt, :approved}
 
         {:rejected, rejection} when attempt == max_attempts ->
-          IO.puts(
-            :stderr,
-            "Fix review rejected for #{relative_review} after #{max_attempts} attempt(s):\n#{rejection}"
-          )
+          Terminal.fix_rejected_final(relative_review, max_attempts, rejection)
 
           {:halt, {:deferred, rejection}}
 
         {:rejected, rejection} ->
-          IO.puts(:stderr, "Fix review rejected for #{relative_review}:\n#{rejection}")
+          Terminal.fix_rejected(relative_review, rejection)
           {:cont, rejection}
       end
     end)
   end
 
   defp review_fix_result!(root, relative_review, source_file, baseline_paths) do
-    IO.puts("Reviewing fix against #{relative_review}")
+    Terminal.fix_review(relative_review)
     Lifecycle.expose_new_untracked_files_to_diff!(root, baseline_paths, relative_review)
     Codex.review_fix(root, relative_review, source_file)
   end
@@ -124,9 +128,7 @@ defmodule Review.Apply.Transaction do
          max_attempts,
          baseline_paths
        ) do
-    IO.puts(
-      "Deferring #{relative_review} after #{max_attempts} rejected attempt(s); recording review feedback and continuing"
-    )
+    Terminal.deferred(relative_review, max_attempts)
 
     Lifecycle.discard_new_changes!(root, baseline_paths, relative_review)
     write_deferred_review!(review_path, relative_review, rejection, max_attempts)
@@ -150,7 +152,7 @@ defmodule Review.Apply.Transaction do
       end
 
     File.write!(review_path, updated)
-    IO.puts("Updated #{relative_review} with latest failed fix review output")
+    Terminal.deferred_updated(relative_review)
   end
 
   defp deferred_review_section(rejection, max_attempts) do
@@ -176,7 +178,7 @@ defmodule Review.Apply.Transaction do
   defp delete_review!(review_path, relative_review) do
     case File.rm(review_path) do
       :ok ->
-        IO.puts("Deleted #{relative_review}")
+        Terminal.deleted(relative_review)
 
       {:error, :enoent} ->
         abort("Review file was already deleted before script cleanup: #{relative_review}")

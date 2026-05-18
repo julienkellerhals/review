@@ -2,11 +2,17 @@ defmodule Review.Apply.Lifecycle do
   @moduledoc false
 
   alias Review.Apply.Git
+  alias Review.Apply.Terminal
   alias Review.Apply.Worktree
 
-  def ensure_ready!(root, target) do
+  def ensure_ready!(root, target, opts \\ []) do
+    mode = Keyword.get(opts, :mode, :commit)
+
     ensure_no_staged_changes!(root)
-    ensure_clean_working_tree_except_reviews!(root, target)
+
+    if mode == :commit do
+      ensure_clean_working_tree_except_reviews!(root, target)
+    end
   end
 
   def run_batch!(root, target, batch, opts) do
@@ -82,13 +88,21 @@ defmodule Review.Apply.Lifecycle do
     |> Enum.sort()
   end
 
-  def commit_review_changes!([], _root, relative_review, _commit_message_fun) do
-    IO.puts(
-      "No new committable changes found after applying #{relative_review}; treating as already applied"
-    )
+  def commit_review_changes!(paths, root, relative_review, commit_message_fun, opts \\ [])
+
+  def commit_review_changes!([], _root, relative_review, _commit_message_fun, _opts) do
+    Terminal.no_changes(relative_review)
   end
 
-  def commit_review_changes!(paths, root, relative_review, commit_message_fun) do
+  def commit_review_changes!(paths, root, relative_review, commit_message_fun, opts) do
+    if Keyword.get(opts, :mode, :commit) == :in_place_no_commit do
+      leave_review_changes_uncommitted!(paths, root, relative_review)
+    else
+      commit_review_changes_to_git!(paths, root, relative_review, commit_message_fun)
+    end
+  end
+
+  defp commit_review_changes_to_git!(paths, root, relative_review, commit_message_fun) do
     commit_message = commit_message_fun.()
     stage_paths = stageable_paths(root, paths)
 
@@ -99,7 +113,15 @@ defmodule Review.Apply.Lifecycle do
     ensure_only_expected_staged_paths!(root, MapSet.new(paths), relative_review)
     ensure_staged_changes!(root, relative_review)
     Git.run!(root, ["commit", "-m", commit_message], "commit changes for #{relative_review}")
-    IO.puts("Committed #{relative_review}: #{commit_message}")
+    Terminal.committed(relative_review, commit_message)
+  end
+
+  defp leave_review_changes_uncommitted!(paths, root, relative_review) do
+    root
+    |> stageable_paths(paths)
+    |> unstage_paths!(root, relative_review)
+
+    Terminal.left_uncommitted(relative_review)
   end
 
   defp ensure_clean_working_tree_except_reviews!(root, target) do
@@ -265,12 +287,8 @@ defmodule Review.Apply.Lifecycle do
   end
 
   defp retry_review_sequential_after_merge_conflict!(root, target, apply_review, job, output) do
-    IO.puts(
-      "Retrying #{job.relative_review} sequentially from current branch head after missed merge conflict"
-    )
-
-    IO.puts("The failed parallel merge was aborted before retrying.")
-    print_command_output(output)
+    Terminal.retry_after_merge_conflict(job.relative_review)
+    Terminal.command_output(output)
 
     case apply_review.(root, target, job.review_path) do
       :approved -> :ok
@@ -279,18 +297,18 @@ defmodule Review.Apply.Lifecycle do
   end
 
   defp merge_review_branch(root, relative_review, branch) do
-    IO.puts("Merging #{relative_review} from #{branch}")
+    Terminal.merge_start(relative_review, branch)
 
     case System.cmd("git", ["merge", "--no-ff", "--no-edit", branch],
            cd: root,
            stderr_to_stdout: true
          ) do
       {output, 0} ->
-        print_command_output(output)
+        Terminal.command_output(output)
         :ok
 
       {output, _status} ->
-        print_command_output(output)
+        Terminal.command_output(output)
 
         if Git.merge_in_progress?(root) do
           Git.run!(root, ["merge", "--abort"], "abort conflicted merge")
@@ -300,9 +318,6 @@ defmodule Review.Apply.Lifecycle do
         end
     end
   end
-
-  defp print_command_output(""), do: :ok
-  defp print_command_output(output), do: IO.puts(output)
 
   defp delete_original_review_after_merge!(review_path) do
     case File.rm(review_path) do
@@ -347,6 +362,12 @@ defmodule Review.Apply.Lifecycle do
     |> Enum.filter(fn path ->
       File.exists?(Path.join(root, path)) or Git.tracked_in_head?(root, path)
     end)
+  end
+
+  defp unstage_paths!([], _root, _relative_review), do: :ok
+
+  defp unstage_paths!(paths, root, relative_review) do
+    Git.run!(root, ["reset", "--" | paths], "leave changes unstaged for #{relative_review}")
   end
 
   defp ensure_no_staged_changes!(root) do

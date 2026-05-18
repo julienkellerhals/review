@@ -7,6 +7,7 @@ Standalone Mix tasks for Codex-driven review workflows.
 ```sh
 mix review.generate [path/to/source-file ...]
 mix review.apply [review|path/to/review.md]
+mix review.apply --no-commit --in-place [review|path/to/review.md]
 mix review.tools
 mix review.zoekt.index
 mix review.cleanup_worktrees
@@ -74,6 +75,14 @@ config :review,
 Select a profile with `--profile one`. Without `--profile`, the tasks use a
 `:default` profile when configured, otherwise the top-level `config :review`
 values.
+
+By default, `mix review.apply` expects a clean checkout except for review
+markdown, then stages and commits each approved fix. Use
+`mix review.apply --no-commit --in-place [review|path/to/review.md]` when you
+want to apply sequentially into the current checkout with existing unstaged local
+changes present. That mode still refuses pre-staged changes, but it skips
+worktree fanout, deletes approved or stale review markdown, and leaves the
+resulting working-tree changes uncommitted.
 
 ## Optional Review Tooling
 

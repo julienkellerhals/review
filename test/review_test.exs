@@ -23,6 +23,25 @@ defmodule ReviewTest do
     assert second.relative_review == "two/review.md"
   end
 
+  test "apply terminal output renders a compact run summary" do
+    jobs = [
+      %{relative_review: "review/lib/foo.ex/review.md", affected_files: ["lib/foo.ex"]}
+    ]
+
+    output =
+      capture_io(fn ->
+        Review.Apply.Terminal.plan(1, 1, 4)
+        Review.Apply.Terminal.batch_start(1, 1, jobs, 4)
+        Review.Apply.Terminal.committed("review/lib/foo.ex/review.md", "Apply review")
+      end)
+
+    assert output =~ "Review apply"
+    assert output =~ "reviews"
+    assert output =~ "[batch 1/1] 1 review(s) | 1 agent(s)"
+    assert output =~ "review/lib/foo.ex/review.md"
+    assert output =~ "[ok] committed"
+  end
+
   test "apply skips reviews that affect files outside the current repo" do
     root = tmp_dir("outside-affected-files")
 
@@ -171,6 +190,126 @@ defmodule ReviewTest do
     after
       restore_env("PATH", previous_path)
       restore_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS", previous_attempts)
+    end
+  end
+
+  test "no-commit in-place apply runs on dirty checkout and leaves changes uncommitted" do
+    root = tmp_dir("in-place-no-commit")
+    bin_dir = tmp_dir("fake-codex-no-commit-bin")
+    codex_path = Path.join(bin_dir, "codex")
+
+    run!(root, "git", ["init"])
+    run!(root, "git", ["config", "user.email", "test@example.com"])
+    run!(root, "git", ["config", "user.name", "Test"])
+    write_file!(root, "lib/source.ex", "original\n")
+    write_file!(root, "notes.txt", "tracked\n")
+    run!(root, "git", ["add", "lib/source.ex", "notes.txt"])
+    run!(root, "git", ["commit", "-m", "init"])
+
+    write_file!(root, "notes.txt", "tracked dirty\n")
+    write_file!(root, "scratch.log", "untracked dirty\n")
+
+    File.mkdir_p!(bin_dir)
+
+    File.write!(codex_path, """
+    #!/bin/sh
+    root=""
+    output=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --cd)
+          shift
+          root="$1"
+          ;;
+        --output-last-message)
+          shift
+          output="$1"
+          ;;
+      esac
+
+      shift
+    done
+
+    prompt=$(cat)
+
+    if [ -z "$output" ]; then
+      printf 'changed\\n' > "$root/lib/source.ex"
+      printf 'new coverage\\n' > "$root/lib/new_test.ex"
+      exit 0
+    fi
+
+    if printf '%s' "$prompt" | grep -q "Generate a git commit subject"; then
+      printf 'unexpected commit message request\\n' > "$root/commit_message_requested"
+      printf 'Unexpected commit\\n' > "$output"
+      exit 0
+    fi
+
+    if git -C "$root" diff -- lib/new_test.ex | grep -q "new file mode"; then
+      printf 'FIX_APPROVED\\n' > "$output"
+    else
+      {
+        printf 'FIX_REJECTED\\n'
+        printf -- '- new file was not visible in git diff\\n'
+      } > "$output"
+    fi
+    """)
+
+    File.chmod!(codex_path, 0o755)
+
+    write_file!(
+      root,
+      "review/lib/source.ex/review.md",
+      """
+      # Review: lib/source.ex
+      Source file: `lib/source.ex`
+      Affected files:
+      - `lib/source.ex`
+      - `lib/new_test.ex`
+
+      ## Overview
+      Add split test coverage.
+      """
+    )
+
+    previous_path = System.get_env("PATH")
+    previous_attempts = System.get_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS")
+
+    try do
+      System.put_env("PATH", bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS", "1")
+
+      in_dir(root, fn ->
+        output =
+          ExUnit.CaptureIO.capture_io(fn ->
+            assert :ok = Review.Apply.main(["--no-commit", "--in-place", "review"])
+          end)
+
+        assert output =~ "[ok] uncommitted"
+      end)
+
+      assert File.read!(Path.join(root, "notes.txt")) == "tracked dirty\n"
+      assert File.read!(Path.join(root, "scratch.log")) == "untracked dirty\n"
+      assert File.read!(Path.join(root, "lib/source.ex")) == "changed\n"
+      assert File.exists?(Path.join(root, "lib/new_test.ex"))
+      refute File.exists?(Path.join(root, "review/lib/source.ex/review.md"))
+      refute File.exists?(Path.join(root, "commit_message_requested"))
+
+      assert String.trim(git_output!(root, ["log", "--format=%s", "-1"])) == "init"
+      refute git_has_staged_changes?(root)
+    after
+      restore_env("PATH", previous_path)
+      restore_env("CODEX_FIX_REVIEW_MAX_ATTEMPTS", previous_attempts)
+    end
+  end
+
+  test "no-commit and in-place apply options must be used together" do
+    assert_raise Review.Error, ~r/--no-commit requires --in-place/, fn ->
+      Review.Apply.main(["--no-commit"])
+    end
+
+    assert_raise Review.Error, ~r/--in-place requires --no-commit/, fn ->
+      Review.Apply.main(["--in-place"])
     end
   end
 
@@ -644,6 +783,14 @@ defmodule ReviewTest do
     case System.cmd("git", args, cd: root, stderr_to_stdout: true) do
       {output, 0} -> output
       {output, status} -> flunk("git #{inspect(args)} exited with #{status}:\n#{output}")
+    end
+  end
+
+  defp git_has_staged_changes?(root) do
+    case System.cmd("git", ["diff", "--cached", "--quiet", "--exit-code"], cd: root) do
+      {_, 0} -> false
+      {_, 1} -> true
+      {output, status} -> flunk("git diff --cached exited with #{status}:\n#{output}")
     end
   end
 

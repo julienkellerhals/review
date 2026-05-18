@@ -3,6 +3,7 @@ defmodule Review.Apply do
   alias Review.Apply.Lifecycle
   alias Review.Apply.Prompts
   alias Review.Apply.ReviewSet
+  alias Review.Apply.Terminal
   alias Review.Apply.Transaction
   @default_max_fix_attempts 3
   @default_apply_concurrency 10
@@ -11,19 +12,21 @@ defmodule Review.Apply do
   def main(["--help"]), do: usage()
 
   def main(args) do
-    runtime = Review.Common.Runtime.from_args!(args, mode: :apply)
+    {mode, runtime_args} = parse_args!(args)
+    runtime = Review.Common.Runtime.from_args!(runtime_args, mode: :apply)
     root = runtime.root
     target = ReviewSet.target(root, runtime.args)
     source_policy = runtime.source_policy
     reviews = ReviewSet.files(target)
-    Lifecycle.ensure_ready!(root, target)
+    Lifecycle.ensure_ready!(root, target, mode: mode)
 
-    apply_reviews!(root, target, source_policy, reviews)
+    apply_reviews!(root, target, source_policy, reviews, mode)
   end
 
   defp usage do
     IO.puts("Usage: mix review.apply [review|path/to/review.md]")
     IO.puts("       mix review.apply --profile PROFILE [review|path/to/review.md]")
+    IO.puts("       mix review.apply --no-commit --in-place [review|path/to/review.md]")
 
     IO.puts("Set REVIEW_DIR to change the default review directory.")
 
@@ -53,10 +56,59 @@ defmodule Review.Apply do
       "Approved reviews are deleted, staged, and committed. Exhausted reviews are annotated and left for a later run."
     )
 
+    IO.puts(
+      "Use --no-commit --in-place to apply sequentially into the current checkout and leave changes uncommitted."
+    )
+
     IO.puts("The starting checkout must be clean except for files under the review target.")
   end
 
-  defp apply_reviews!(root, target, source_policy, reviews) do
+  defp parse_args!(args) do
+    {options, rest, invalid} =
+      OptionParser.parse(args,
+        strict: [profile: :string, no_commit: :boolean, in_place: :boolean],
+        aliases: [p: :profile]
+      )
+
+    if invalid != [] do
+      invalid_args =
+        invalid
+        |> Enum.map_join(" ", fn
+          {key, nil} -> key
+          {key, value} -> "#{key} #{value}"
+        end)
+
+      raise Review.Error, "Unknown review arguments: #{invalid_args}"
+    end
+
+    no_commit? = Keyword.get(options, :no_commit, false)
+    in_place? = Keyword.get(options, :in_place, false)
+
+    mode =
+      cond do
+        no_commit? and in_place? ->
+          :in_place_no_commit
+
+        no_commit? ->
+          raise Review.Error, "--no-commit requires --in-place"
+
+        in_place? ->
+          raise Review.Error, "--in-place requires --no-commit"
+
+        true ->
+          :commit
+      end
+
+    runtime_args =
+      case Keyword.fetch(options, :profile) do
+        {:ok, profile} -> ["--profile", profile | rest]
+        :error -> rest
+      end
+
+    {mode, runtime_args}
+  end
+
+  defp apply_reviews!(root, target, source_policy, reviews, mode) do
     jobs =
       reviews
       |> Enum.flat_map(fn review_path ->
@@ -66,30 +118,32 @@ defmodule Review.Apply do
 
           {:stale, source_file, message} ->
             relative_review = Path.relative_to(review_path, root)
-            Transaction.skip_stale(root, review_path, relative_review, source_file, message)
+
+            Transaction.skip_stale(root, review_path, relative_review, source_file, message,
+              mode: mode
+            )
+
             []
 
           {:skip_invalid_affected_file, message} ->
-            IO.puts(message)
+            Terminal.warning(message)
             []
         end
       end)
 
     if jobs == [] do
-      IO.puts("No applicable reviews left after skipping review files")
+      Terminal.info("No applicable reviews left after skipping review files")
       :ok
     else
-      apply_review_jobs!(root, target, source_policy, jobs)
+      apply_review_jobs!(root, target, source_policy, jobs, mode)
     end
   end
 
-  defp apply_review_jobs!(root, target, source_policy, jobs) do
-    concurrency = apply_concurrency()
+  defp apply_review_jobs!(root, target, source_policy, jobs, mode) do
+    concurrency = apply_concurrency(mode)
     batches = BatchPlanner.plan(jobs, concurrency)
 
-    IO.puts(
-      "Implementation plan: #{length(jobs)} review(s), #{length(batches)} batch(es), up to #{concurrency} parallel agent(s)"
-    )
+    Terminal.plan(length(jobs), length(batches), concurrency)
 
     started_branch = Lifecycle.current_branch!(root)
     total_batches = length(batches)
@@ -97,15 +151,7 @@ defmodule Review.Apply do
     batches
     |> Enum.with_index(1)
     |> Enum.each(fn {batch, index} ->
-      parallel_agents = min(length(batch), concurrency)
-
-      IO.puts(
-        "Batch #{index}/#{total_batches}: applying #{length(batch)} review(s) with #{parallel_agents} parallel agent(s)"
-      )
-
-      Enum.each(batch, fn job ->
-        IO.puts("- #{job.relative_review} affects: #{Enum.join(job.affected_files, ", ")}")
-      end)
+      Terminal.batch_start(index, total_batches, batch, concurrency)
 
       Lifecycle.run_batch!(
         root,
@@ -118,7 +164,8 @@ defmodule Review.Apply do
             review_target,
             source_policy,
             review_path,
-            max_attempts: max_fix_attempts()
+            max_attempts: max_fix_attempts(),
+            mode: mode
           )
         end,
         skip_stale: fn review_root, job ->
@@ -127,12 +174,13 @@ defmodule Review.Apply do
             job.review_path,
             job.relative_review,
             job.source_file,
-            ReviewSet.stale_source_message(job.relative_review, job.source_file)
+            ReviewSet.stale_source_message(job.relative_review, job.source_file),
+            mode: mode
           )
         end
       )
 
-      IO.puts("Remaining implementation steps after this batch: #{total_batches - index}")
+      Terminal.batch_done(total_batches - index)
     end)
   end
 
@@ -140,7 +188,9 @@ defmodule Review.Apply do
     BatchPlanner.plan(jobs, concurrency)
   end
 
-  defp apply_concurrency do
+  defp apply_concurrency(:in_place_no_commit), do: 1
+
+  defp apply_concurrency(:commit) do
     Review.Common.Env.positive_integer("CODEX_APPLY_CONCURRENCY", @default_apply_concurrency)
   end
 

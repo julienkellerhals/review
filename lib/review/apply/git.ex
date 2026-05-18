@@ -1,6 +1,8 @@
 defmodule Review.Apply.Git do
   @moduledoc false
 
+  alias Review.Apply.Terminal
+
   def current_branch!(root) do
     case System.cmd("git", ["symbolic-ref", "--quiet", "--short", "HEAD"],
            cd: root,
@@ -101,7 +103,7 @@ defmodule Review.Apply.Git do
   def run!(root, args, action) do
     case output!(root, args, action) do
       "" -> :ok
-      output -> IO.puts(output)
+      output -> Terminal.command_output(output)
     end
   end
 

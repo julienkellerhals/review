@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Review.Apply do
       $ mix review.apply
       $ mix review.apply review/path/to/review.md
       $ mix review.apply --profile one
+      $ mix review.apply --no-commit --in-place
 
   Environment variables such as `REVIEW_DIR`, `REVIEW_SOURCE_BLACKLIST`,
   `CODEX_MODEL`, `CODEX_APPLY_REASONING_EFFORT`, `CODEX_REVIEW_REASONING_EFFORT`,
@@ -17,6 +18,11 @@ defmodule Mix.Tasks.Review.Apply do
 
   Define `profiles: [one: [...], two: [...]]` in `config :review` and select
   one with `--profile one` for per-subproject config.
+
+  By default, approved review fixes are committed by the task and the checkout
+  must be clean except for review markdown. Use `--no-commit --in-place` to run
+  sequentially in the current checkout, allow existing unstaged local changes,
+  and leave applied fixes uncommitted.
   """
 
   @impl Mix.Task

@@ -2,6 +2,7 @@ defmodule Review.Apply.Worktree do
   @moduledoc false
 
   alias Review.Apply.Git
+  alias Review.Apply.Terminal
 
   def apply!(root, target, job, base_head, apply_review) do
     repo_root = Git.repo_root!(root)
@@ -10,7 +11,7 @@ defmodule Review.Apply.Worktree do
     worktree_root = profile_root_in_worktree(repo_root, root, worktree)
 
     try do
-      IO.puts("Starting #{job.relative_review} in #{worktree}")
+      Terminal.worktree_start(job.relative_review, worktree)
       Git.run!(root, ["worktree", "add", "-b", branch, worktree, base_head], "create worktree")
       sync_current_checkout_to_worktree!(root, worktree_root)
       copy_review_to_worktree!(root, worktree_root, job.relative_review)
