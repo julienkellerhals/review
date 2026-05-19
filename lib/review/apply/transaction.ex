@@ -12,6 +12,7 @@ defmodule Review.Apply.Transaction do
   def apply(root, target, source_policy, review_path, opts) do
     max_attempts = Keyword.fetch!(opts, :max_attempts)
     mode = Keyword.get(opts, :mode, :commit)
+    profile = Keyword.get(opts, :profile)
     relative_review = Path.relative_to(review_path, root)
     source_file = ReviewSet.source_from_review(root, review_path, target)
     baseline_head = Lifecycle.git_head(root)
@@ -25,7 +26,8 @@ defmodule Review.Apply.Transaction do
                source_file,
                baseline_head,
                baseline_paths,
-               max_attempts
+               max_attempts,
+               profile
              ) do
           :approved ->
             delete_review!(review_path, relative_review)
@@ -36,7 +38,9 @@ defmodule Review.Apply.Transaction do
               paths,
               root,
               relative_review,
-              fn -> Codex.commit_message(root, relative_review, source_file) end,
+              fn ->
+                Codex.commit_message(root, relative_review, source_file, profile: profile)
+              end,
               mode: mode
             )
 
@@ -75,7 +79,9 @@ defmodule Review.Apply.Transaction do
       relative_review,
       fn ->
         "Remove stale review"
-      end, mode: mode)
+      end,
+      mode: mode
+    )
   end
 
   defp apply_until_review_approved!(
@@ -84,7 +90,8 @@ defmodule Review.Apply.Transaction do
          source_file,
          baseline_head,
          baseline_paths,
-         max_attempts
+         max_attempts,
+         profile
        ) do
     1..max_attempts
     |> Enum.reduce_while(nil, fn attempt, previous_rejection ->
@@ -94,11 +101,11 @@ defmodule Review.Apply.Transaction do
         Terminal.review_retry(relative_review)
       end
 
-      Codex.apply_review(root, relative_review, source_file, previous_rejection)
+      Codex.apply_review(root, relative_review, source_file, previous_rejection, profile: profile)
 
       Lifecycle.ensure_head_unchanged!(root, baseline_head, relative_review)
 
-      case review_fix_result!(root, relative_review, source_file, baseline_paths) do
+      case review_fix_result!(root, relative_review, source_file, baseline_paths, profile) do
         :approved ->
           {:halt, :approved}
 
@@ -114,10 +121,10 @@ defmodule Review.Apply.Transaction do
     end)
   end
 
-  defp review_fix_result!(root, relative_review, source_file, baseline_paths) do
+  defp review_fix_result!(root, relative_review, source_file, baseline_paths, profile) do
     Terminal.fix_review(relative_review)
     Lifecycle.expose_new_untracked_files_to_diff!(root, baseline_paths, relative_review)
-    Codex.review_fix(root, relative_review, source_file)
+    Codex.review_fix(root, relative_review, source_file, profile: profile)
   end
 
   defp defer_rejected_review!(

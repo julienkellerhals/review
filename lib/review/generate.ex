@@ -9,7 +9,8 @@ defmodule Review.Generate do
   def main(["--help"]), do: usage()
 
   def main(args) do
-    runtime = Review.Common.Runtime.from_args!(args, mode: :generate)
+    {resume?, runtime_args} = parse_args!(args)
+    runtime = Review.Common.Runtime.from_args!(runtime_args, mode: :generate)
     root = runtime.root
     review_dir = runtime.review_dir
     concurrency = review_concurrency()
@@ -20,7 +21,7 @@ defmodule Review.Generate do
     files = SourceSet.files(root, runtime.args, review_dir, source_policy, source_dirs)
     Review.Tools.Tooling.maybe_report(root)
 
-    review_files(files, root, review_dir, concurrency)
+    review_files(files, root, review_dir, concurrency, resume?, runtime.profile)
   end
 
   def discover_source_files(
@@ -37,6 +38,7 @@ defmodule Review.Generate do
   defp usage do
     IO.puts("Usage: mix review.generate [path/to/source-file ...]")
     IO.puts("       mix review.generate --profile PROFILE [path/to/source-file ...]")
+    IO.puts("       mix review.generate --resume [path/to/source-file ...]")
 
     IO.puts(
       "Without explicit files, supported source files under non-ignored folders are reviewed."
@@ -56,19 +58,49 @@ defmodule Review.Generate do
     )
 
     IO.puts("Set CODEX_MODEL to override the Codex model. Defaults to gpt-5.5.")
-    IO.puts("Set CODEX_REASONING_EFFORT to override the reasoning effort. Defaults to high.")
+
+    IO.puts(
+      "Configure codex_reasoning_effort and codex_fast_mode in config :review, or override with CODEX_REASONING_EFFORT and CODEX_FAST_MODE."
+    )
+  end
+
+  defp parse_args!(args) do
+    {options, rest, invalid} =
+      OptionParser.parse(args,
+        strict: [profile: :string, resume: :boolean],
+        aliases: [p: :profile]
+      )
+
+    if invalid != [] do
+      invalid_args =
+        invalid
+        |> Enum.map_join(" ", fn
+          {key, nil} -> key
+          {key, value} -> "#{key} #{value}"
+        end)
+
+      raise Review.Error, "Unknown review arguments: #{invalid_args}"
+    end
+
+    runtime_args =
+      case Keyword.fetch(options, :profile) do
+        {:ok, profile} -> ["--profile", profile | rest]
+        :error -> rest
+      end
+
+    {Keyword.get(options, :resume, false), runtime_args}
   end
 
   defp review_concurrency do
     Review.Common.Env.positive_integer("REVIEW_CONCURRENCY", @default_concurrency)
   end
 
-  defp review_files(files, root, review_dir, concurrency) do
+  defp review_files(files, root, review_dir, concurrency, resume?, profile) do
     IO.puts("Reviewing #{length(files)} file(s) with up to #{concurrency} concurrent Codex execs")
 
     failures =
       files
-      |> Task.async_stream(&safe_review_file(root, review_dir, &1),
+      |> Task.async_stream(&safe_review_file(root, review_dir, &1, resume?, profile),
         max_concurrency: concurrency,
         ordered: false,
         timeout: :infinity
@@ -86,8 +118,8 @@ defmodule Review.Generate do
     end
   end
 
-  defp safe_review_file(root, review_dir, source) do
-    ReviewFile.review(root, review_dir, source)
+  defp safe_review_file(root, review_dir, source, resume?, profile) do
+    ReviewFile.review(root, review_dir, source, resume: resume?, profile: profile)
   rescue
     exception ->
       relative_source = Path.relative_to(source, root)

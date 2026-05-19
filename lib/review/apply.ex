@@ -20,7 +20,7 @@ defmodule Review.Apply do
     reviews = ReviewSet.files(target)
     Lifecycle.ensure_ready!(root, target, mode: mode)
 
-    apply_reviews!(root, target, source_policy, reviews, mode)
+    apply_reviews!(root, target, source_policy, reviews, mode, runtime.profile)
   end
 
   defp usage do
@@ -41,7 +41,7 @@ defmodule Review.Apply do
     IO.puts("Set CODEX_MODEL to override the Codex model. Defaults to gpt-5.5.")
 
     IO.puts(
-      "Set CODEX_APPLY_REASONING_EFFORT or CODEX_REVIEW_REASONING_EFFORT to override reasoning effort. Apply defaults to low; review defaults to medium."
+      "Configure codex_apply_reasoning_effort, codex_review_reasoning_effort, codex_apply_fast_mode, and codex_review_fast_mode in config :review. CODEX_* env vars override config for one run."
     )
 
     IO.puts("Set CODEX_FIX_REVIEW_MAX_ATTEMPTS to override fix-review retries. Defaults to 3.")
@@ -108,7 +108,7 @@ defmodule Review.Apply do
     {mode, runtime_args}
   end
 
-  defp apply_reviews!(root, target, source_policy, reviews, mode) do
+  defp apply_reviews!(root, target, source_policy, reviews, mode, profile) do
     jobs =
       reviews
       |> Enum.flat_map(fn review_path ->
@@ -135,11 +135,11 @@ defmodule Review.Apply do
       Terminal.info("No applicable reviews left after skipping review files")
       :ok
     else
-      apply_review_jobs!(root, target, source_policy, jobs, mode)
+      apply_review_jobs!(root, target, source_policy, jobs, mode, profile)
     end
   end
 
-  defp apply_review_jobs!(root, target, source_policy, jobs, mode) do
+  defp apply_review_jobs!(root, target, source_policy, jobs, mode, profile) do
     concurrency = apply_concurrency(mode)
     batches = BatchPlanner.plan(jobs, concurrency)
 
@@ -165,7 +165,8 @@ defmodule Review.Apply do
             source_policy,
             review_path,
             max_attempts: max_fix_attempts(),
-            mode: mode
+            mode: mode,
+            profile: profile
           )
         end,
         skip_stale: fn review_root, job ->

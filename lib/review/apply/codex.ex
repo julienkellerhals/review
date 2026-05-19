@@ -7,20 +7,24 @@ defmodule Review.Apply.Codex do
   @default_apply_reasoning_effort "low"
   @default_review_reasoning_effort "medium"
 
-  def apply_review(root, relative_review, source_file, previous_rejection) do
+  def apply_review(root, relative_review, source_file, previous_rejection, opts \\ []) do
     prompt = Prompts.apply_prompt(relative_review, source_file, previous_rejection)
+    profile = Keyword.get(opts, :profile)
 
-    case CodexCLI.exec(codex_apply_args(root), prompt, prompt_prefix: "codex-review-apply-prompt") do
+    case CodexCLI.exec(codex_apply_args(root, profile), prompt,
+           prompt_prefix: "codex-review-apply-prompt"
+         ) do
       {_, 0} -> :ok
       {_, status} -> abort("Failed applying #{relative_review}; codex exited with #{status}")
     end
   end
 
-  def review_fix(root, relative_review, source_file) do
+  def review_fix(root, relative_review, source_file, opts \\ []) do
     output_path = CodexCLI.tmp_markdown_path("codex-fix-review")
+    profile = Keyword.get(opts, :profile)
 
     case CodexCLI.exec(
-           codex_read_only_args(root, output_path),
+           codex_read_only_args(root, output_path, profile),
            Prompts.review_fix_prompt(relative_review, source_file),
            prompt_prefix: "codex-review-fix-prompt"
          ) do
@@ -39,11 +43,12 @@ defmodule Review.Apply.Codex do
     end
   end
 
-  def commit_message(root, relative_review, source_file) do
+  def commit_message(root, relative_review, source_file, opts \\ []) do
     output_path = CodexCLI.tmp_markdown_path("codex-review-commit-message")
+    profile = Keyword.get(opts, :profile)
 
     case CodexCLI.exec(
-           codex_read_only_args(root, output_path),
+           codex_read_only_args(root, output_path, profile),
            Prompts.commit_message_prompt(relative_review, source_file),
            prompt_prefix: "codex-review-commit-message-prompt"
          ) do
@@ -61,7 +66,7 @@ defmodule Review.Apply.Codex do
     end
   end
 
-  defp codex_apply_args(root) do
+  defp codex_apply_args(root, profile) do
     [
       "exec",
       "--cd",
@@ -69,10 +74,14 @@ defmodule Review.Apply.Codex do
       "--full-auto",
       "-"
     ]
-    |> CodexCLI.runtime_args(apply_reasoning_effort())
+    |> CodexCLI.runtime_args(
+      profile: profile,
+      reasoning_effort: apply_reasoning_effort(profile),
+      fast_mode: apply_fast_mode(profile)
+    )
   end
 
-  defp codex_read_only_args(root, output_path) do
+  defp codex_read_only_args(root, output_path, profile) do
     [
       "exec",
       "--cd",
@@ -83,20 +92,40 @@ defmodule Review.Apply.Codex do
       output_path,
       "-"
     ]
-    |> CodexCLI.runtime_args(review_reasoning_effort())
-  end
-
-  defp apply_reasoning_effort do
-    Review.Common.Env.string(
-      "CODEX_APPLY_REASONING_EFFORT",
-      Review.Common.Env.string("CODEX_REASONING_EFFORT", @default_apply_reasoning_effort)
+    |> CodexCLI.runtime_args(
+      profile: profile,
+      reasoning_effort: review_reasoning_effort(profile),
+      fast_mode: review_fast_mode(profile)
     )
   end
 
-  defp review_reasoning_effort do
-    Review.Common.Env.string(
-      "CODEX_REVIEW_REASONING_EFFORT",
-      Review.Common.Env.string("CODEX_REASONING_EFFORT", @default_review_reasoning_effort)
+  defp apply_reasoning_effort(profile) do
+    Review.Common.Config.codex_reasoning_effort(profile,
+      env: "CODEX_APPLY_REASONING_EFFORT",
+      key: :codex_apply_reasoning_effort,
+      default: @default_apply_reasoning_effort
+    )
+  end
+
+  defp review_reasoning_effort(profile) do
+    Review.Common.Config.codex_reasoning_effort(profile,
+      env: "CODEX_REVIEW_REASONING_EFFORT",
+      key: :codex_review_reasoning_effort,
+      default: @default_review_reasoning_effort
+    )
+  end
+
+  defp apply_fast_mode(profile) do
+    Review.Common.Config.codex_fast_mode(profile,
+      env: "CODEX_APPLY_FAST_MODE",
+      key: :codex_apply_fast_mode
+    )
+  end
+
+  defp review_fast_mode(profile) do
+    Review.Common.Config.codex_fast_mode(profile,
+      env: "CODEX_REVIEW_FAST_MODE",
+      key: :codex_review_fast_mode
     )
   end
 

@@ -11,10 +11,13 @@ defmodule Mix.Tasks.Review.Apply do
       $ mix review.apply --profile one
       $ mix review.apply --no-commit --in-place
 
-  Environment variables such as `REVIEW_DIR`, `REVIEW_SOURCE_BLACKLIST`,
-  `CODEX_MODEL`, `CODEX_APPLY_REASONING_EFFORT`, `CODEX_REVIEW_REASONING_EFFORT`,
+  Configure Codex with `codex_model`, `codex_apply_reasoning_effort`,
+  `codex_review_reasoning_effort`, `codex_fast_mode`, `codex_apply_fast_mode`,
+  and `codex_review_fast_mode` in `config :review`. Environment variables such
+  as `REVIEW_DIR`, `REVIEW_SOURCE_BLACKLIST`, `CODEX_MODEL`,
+  `CODEX_APPLY_REASONING_EFFORT`, `CODEX_REVIEW_REASONING_EFFORT`,
   `CODEX_FIX_REVIEW_MAX_ATTEMPTS`, `CODEX_COMMAND_MAX_ATTEMPTS`, and
-  `CODEX_APPLY_CONCURRENCY` control the apply run.
+  `CODEX_APPLY_CONCURRENCY` override config for one run.
 
   Define `profiles: [one: [...], two: [...]]` in `config :review` and select
   one with `--profile one` for per-subproject config.

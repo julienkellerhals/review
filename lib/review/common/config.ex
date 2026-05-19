@@ -31,6 +31,8 @@ defmodule Review.Common.Config do
     "vendor"
   ]
 
+  @valid_reasoning_efforts ["low", "medium", "high", "xhigh"]
+
   def review_dir(root, profile \\ nil) do
     dir =
       case System.get_env("REVIEW_DIR") do
@@ -66,6 +68,60 @@ defmodule Review.Common.Config do
     profile
     |> Review.Common.Profile.value(:source_blacklist, @default_source_blacklist)
     |> normalize_source_path_filter!(:source_blacklist)
+  end
+
+  def codex_model(profile \\ nil, default) do
+    case System.get_env("CODEX_MODEL") do
+      nil -> profile_config_value(profile, :codex_model, default)
+      "" -> profile_config_value(profile, :codex_model, default)
+      value -> value
+    end
+    |> normalize_codex_model!()
+  end
+
+  def codex_reasoning_effort(profile \\ nil, opts) do
+    env = Keyword.fetch!(opts, :env)
+    key = Keyword.fetch!(opts, :key)
+    default = Keyword.fetch!(opts, :default)
+
+    value =
+      case System.get_env(env) do
+        nil -> nil
+        "" -> nil
+        value -> value
+      end ||
+        case System.get_env("CODEX_REASONING_EFFORT") do
+          nil -> nil
+          "" -> nil
+          value -> value
+        end ||
+        profile_config_value(profile, key, nil) ||
+        profile_config_value(profile, :codex_reasoning_effort, default)
+
+    normalize_codex_reasoning_effort!(value, key)
+  end
+
+  def codex_fast_mode(profile \\ nil, opts) do
+    env = Keyword.fetch!(opts, :env)
+    key = Keyword.fetch!(opts, :key)
+
+    value =
+      first_configured([
+        env_boolean(env),
+        env_boolean("CODEX_FAST_MODE"),
+        profile_config_value(profile, key, nil),
+        profile_config_value(profile, :codex_fast_mode, nil)
+      ])
+
+    normalize_codex_fast_mode!(value, key)
+  end
+
+  defp profile_config_value(profile, key, default) do
+    Review.Common.Profile.value(profile, key, default)
+  end
+
+  defp first_configured(values) do
+    Enum.find(values, &(!is_nil(&1)))
   end
 
   defp normalize_review_dir!(dir) when is_binary(dir) do
@@ -192,5 +248,63 @@ defmodule Review.Common.Config do
   defp normalize_source_path_filter_entry!(value, name) do
     raise Review.Error,
           "Expected :review, :#{name} entries to be folder names, got: #{inspect(value)}"
+  end
+
+  defp normalize_codex_model!(model) when is_binary(model) do
+    model = String.trim(model)
+
+    if model == "" do
+      raise Review.Error, "Expected :review, :codex_model to be a non-empty string"
+    end
+
+    model
+  end
+
+  defp normalize_codex_model!(value) do
+    raise Review.Error, "Expected :review, :codex_model to be a string, got: #{inspect(value)}"
+  end
+
+  defp normalize_codex_reasoning_effort!(effort, key) when is_binary(effort) do
+    effort = String.trim(effort)
+
+    if effort in @valid_reasoning_efforts do
+      effort
+    else
+      raise Review.Error,
+            "Expected :review, :#{key} to be one of #{inspect(@valid_reasoning_efforts)}, got: #{inspect(effort)}"
+    end
+  end
+
+  defp normalize_codex_reasoning_effort!(value, key) do
+    raise Review.Error, "Expected :review, :#{key} to be a string, got: #{inspect(value)}"
+  end
+
+  defp normalize_codex_fast_mode!(value, _key) when value in [true, false, nil], do: value
+
+  defp normalize_codex_fast_mode!(value, key) when is_binary(value) do
+    case String.downcase(String.trim(value)) do
+      "true" -> true
+      "1" -> true
+      "yes" -> true
+      "false" -> false
+      "0" -> false
+      "no" -> false
+      "" -> nil
+      _ -> invalid_codex_fast_mode!(value, key)
+    end
+  end
+
+  defp normalize_codex_fast_mode!(value, key), do: invalid_codex_fast_mode!(value, key)
+
+  defp invalid_codex_fast_mode!(value, key) do
+    raise Review.Error, "Expected :review, :#{key} to be a boolean, got: #{inspect(value)}"
+  end
+
+  defp env_boolean(name) do
+    case System.get_env(name) do
+      nil -> nil
+      "" -> nil
+      value -> normalize_codex_fast_mode!(value, name)
+    end
   end
 end

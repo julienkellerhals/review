@@ -7,28 +7,49 @@ defmodule Review.Common.Codex do
   def exec(args, prompt, opts \\ []) do
     prompt_path = tmp_path(Keyword.get(opts, :prompt_prefix, "codex-review-prompt"), "md")
     max_attempts = Keyword.get(opts, :max_attempts, command_max_attempts())
+    log_path = Keyword.get(opts, :log_path)
+    session_path = Keyword.get(opts, :session_path)
 
     File.write!(prompt_path, prompt)
+    reset_log(log_path)
 
     try do
-      exec_with_retry(args, prompt_path, max_attempts, 1)
+      result = exec_with_retry(args, prompt_path, max_attempts, 1, log_path)
+      maybe_write_session(session_path, result)
+      result
     after
       File.rm(prompt_path)
     end
   end
 
-  def runtime_args(args, reasoning_effort) do
-    [
-      "--config",
-      "model_reasoning_effort=#{reasoning_effort}",
-      "--model",
-      model()
-      | args
-    ]
+  def runtime_args(args, reasoning_effort) when is_binary(reasoning_effort) do
+    runtime_args(args, reasoning_effort: reasoning_effort)
   end
 
-  def model do
-    Review.Common.Env.string("CODEX_MODEL", @default_model)
+  def runtime_args(args, opts) do
+    reasoning_effort = Keyword.fetch!(opts, :reasoning_effort)
+    model = Keyword.get(opts, :model, model(Keyword.get(opts, :profile)))
+    fast_mode = Keyword.get(opts, :fast_mode)
+
+    fast_mode_args =
+      case fast_mode do
+        true -> ["--enable", "fast_mode"]
+        false -> ["--disable", "fast_mode"]
+        nil -> []
+      end
+
+    fast_mode_args ++
+      [
+        "--config",
+        "model_reasoning_effort=#{reasoning_effort}",
+        "--model",
+        model
+        | args
+      ]
+  end
+
+  def model(profile \\ nil) do
+    Review.Common.Config.codex_model(profile, @default_model)
   end
 
   def tmp_markdown_path(prefix) do
@@ -57,7 +78,7 @@ defmodule Review.Common.Codex do
     )
   end
 
-  defp exec_with_retry(args, prompt_path, max_attempts, attempt) do
+  defp exec_with_retry(args, prompt_path, max_attempts, attempt, log_path) do
     result =
       System.cmd(
         "sh",
@@ -70,6 +91,8 @@ defmodule Review.Common.Codex do
         ],
         stderr_to_stdout: true
       )
+
+    append_log(log_path, attempt, result)
 
     case result do
       {_output, 0} ->
@@ -84,7 +107,7 @@ defmodule Review.Common.Codex do
             "Retrying Codex command after retryable failure (attempt #{attempt + 1}/#{max_attempts})"
           )
 
-          exec_with_retry(args, prompt_path, max_attempts, attempt + 1)
+          exec_with_retry(args, prompt_path, max_attempts, attempt + 1, log_path)
         else
           maybe_report_failed_log(result)
           result
@@ -116,5 +139,56 @@ defmodule Review.Common.Codex do
       ],
       &String.contains?(normalized, &1)
     )
+  end
+
+  defp maybe_write_session(nil, _result), do: :ok
+  defp maybe_write_session(_session_path, {_output, status}) when status != 0, do: :ok
+
+  defp maybe_write_session(session_path, {output, 0}) do
+    case thread_id(output) do
+      nil ->
+        :ok
+
+      id ->
+        File.mkdir_p!(Path.dirname(session_path))
+        File.write!(session_path, id <> "\n")
+    end
+  end
+
+  defp thread_id(output) do
+    Regex.run(~r/"type"\s*:\s*"thread\.started".*"thread_id"\s*:\s*"([^"]+)"/, output,
+      capture: :all_but_first
+    )
+    |> case do
+      [id] -> id
+      _ -> nil
+    end
+  end
+
+  defp reset_log(nil), do: :ok
+
+  defp reset_log(log_path) do
+    File.mkdir_p!(Path.dirname(log_path))
+    File.write!(log_path, "")
+  end
+
+  defp append_log(nil, _attempt, _result), do: :ok
+
+  defp append_log(log_path, attempt, {output, status}) do
+    File.write!(
+      log_path,
+      [
+        "== Codex attempt #{attempt} exited with #{status} ==\n",
+        output,
+        maybe_trailing_newline(output)
+      ],
+      [:append]
+    )
+  end
+
+  defp maybe_trailing_newline(""), do: ""
+
+  defp maybe_trailing_newline(output) do
+    if String.ends_with?(output, "\n"), do: "", else: "\n"
   end
 end

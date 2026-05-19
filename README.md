@@ -6,6 +6,7 @@ Standalone Mix tasks for Codex-driven review workflows.
 
 ```sh
 mix review.generate [path/to/source-file ...]
+mix review.generate --resume [path/to/source-file ...]
 mix review.apply [review|path/to/review.md]
 mix review.apply --no-commit --in-place [review|path/to/review.md]
 mix review.tools
@@ -40,7 +41,12 @@ config :review,
   source_dirs: ["lib", "test", "config", "priv", "assets"],
   source_dirs_mode: :discover,
   source_file_extensions: [".ex", ".exs", ".heex", ".js", ".ts"],
-  source_blacklist: [".git", "_build", "deps", "node_modules"]
+  source_blacklist: [".git", "_build", "deps", "node_modules"],
+  codex_model: "gpt-5.5",
+  codex_reasoning_effort: "high",
+  codex_apply_reasoning_effort: "low",
+  codex_review_reasoning_effort: "medium",
+  codex_fast_mode: true
 ```
 
 `review_dir` controls where markdown files are written. `source_dirs` entries
@@ -51,6 +57,23 @@ arguments can still point outside those roots. With
 generation and apply validation. `source_file_extensions` controls which file
 extensions are reviewable. `source_blacklist` controls ignored folder names;
 `REVIEW_SOURCE_BLACKLIST` can still override it for one run.
+
+Codex settings can also live in `config.exs`. `codex_model` selects the model.
+`codex_reasoning_effort` controls `mix review.generate`;
+`codex_apply_reasoning_effort` controls implementation agents in
+`mix review.apply`; `codex_review_reasoning_effort` controls the read-only fix
+review and commit-message agents. Supported reasoning values are `"low"`,
+`"medium"`, `"high"`, and `"xhigh"`. Set `codex_fast_mode` to `true` or `false`
+to force fast mode for all Codex calls, or use `codex_apply_fast_mode` and
+`codex_review_fast_mode` to override apply and read-only apply-review calls
+separately. `CODEX_*` environment variables still override config for one run.
+
+Each generated `review.md` gets adjacent `review.log` and `review.session`
+files. The log contains the full Codex command transcript for that review
+generation attempt, including retries. The session file stores the Codex thread
+id, so `mix review.generate --resume [path/to/source-file ...]` can resume the
+matching chat session and rewrite that review. If no session file exists for a
+source file, resume mode starts a new review session.
 
 Profiles let one repository hold different review configs for subprojects:
 

@@ -193,6 +193,73 @@ defmodule ReviewTest do
     end
   end
 
+  test "apply codex options can be configured with application config" do
+    root = tmp_dir("apply-codex-config")
+    bin_dir = tmp_dir("fake-codex-apply-config-bin")
+    codex_path = Path.join(bin_dir, "codex")
+
+    File.mkdir_p!(bin_dir)
+
+    File.write!(codex_path, """
+    #!/bin/sh
+    args="$*"
+    root=""
+    output=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --cd)
+          shift
+          root="$1"
+          ;;
+        --output-last-message)
+          shift
+          output="$1"
+          ;;
+      esac
+
+      shift
+    done
+
+    printf '%s\\n' "$args" >> "$root/codex_args.log"
+
+    if [ -n "$output" ]; then
+      printf 'FIX_APPROVED\\n' > "$output"
+    fi
+    """)
+
+    File.chmod!(codex_path, 0o755)
+
+    previous_path = System.get_env("PATH")
+    previous_apply_reasoning = Application.get_env(:review, :codex_apply_reasoning_effort)
+    previous_review_reasoning = Application.get_env(:review, :codex_review_reasoning_effort)
+    previous_apply_fast = Application.get_env(:review, :codex_apply_fast_mode)
+    previous_review_fast = Application.get_env(:review, :codex_review_fast_mode)
+
+    try do
+      System.put_env("PATH", bin_dir <> ":" <> (previous_path || ""))
+      Application.put_env(:review, :codex_apply_reasoning_effort, "high")
+      Application.put_env(:review, :codex_review_reasoning_effort, "xhigh")
+      Application.put_env(:review, :codex_apply_fast_mode, false)
+      Application.put_env(:review, :codex_review_fast_mode, true)
+
+      assert :ok = Review.Apply.Codex.apply_review(root, "review.md", "lib/source.ex", nil)
+      assert :approved = Review.Apply.Codex.review_fix(root, "review.md", "lib/source.ex")
+
+      codex_args = File.read!(Path.join(root, "codex_args.log"))
+      assert codex_args =~ "model_reasoning_effort=high"
+      assert codex_args =~ "model_reasoning_effort=xhigh"
+      assert codex_args =~ "--disable fast_mode"
+      assert codex_args =~ "--enable fast_mode"
+    after
+      restore_env("PATH", previous_path)
+      restore_app_env(:codex_apply_reasoning_effort, previous_apply_reasoning)
+      restore_app_env(:codex_review_reasoning_effort, previous_review_reasoning)
+      restore_app_env(:codex_apply_fast_mode, previous_apply_fast)
+      restore_app_env(:codex_review_fast_mode, previous_review_fast)
+    end
+  end
+
   test "no-commit in-place apply runs on dirty checkout and leaves changes uncommitted" do
     root = tmp_dir("in-place-no-commit")
     bin_dir = tmp_dir("fake-codex-no-commit-bin")
@@ -437,6 +504,251 @@ defmodule ReviewTest do
   test "invalid generator input raises a review error instead of halting the VM" do
     assert_raise Review.Error, ~r/Expected a file under/, fn ->
       Review.Generate.main(["/definitely/outside/this/repo.ex"])
+    end
+  end
+
+  test "generate writes a codex transcript log next to each review file" do
+    root = tmp_dir("generate-review-logs")
+    bin_dir = tmp_dir("fake-codex-generate-bin")
+    codex_path = Path.join(bin_dir, "codex")
+
+    write_file!(root, "lib/a.ex")
+    write_file!(root, "lib/b.ex")
+    File.mkdir_p!(bin_dir)
+
+    File.write!(codex_path, """
+    #!/bin/sh
+    output=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output-last-message)
+          shift
+          output="$1"
+          ;;
+      esac
+
+      shift
+    done
+
+    prompt=$(cat)
+
+    if printf '%s' "$prompt" | grep -q "lib/a.ex"; then
+      source="lib/a.ex"
+    else
+      source="lib/b.ex"
+    fi
+
+    printf 'full transcript for %s\\n' "$source"
+
+    {
+      printf '# Review: %s\\n' "$source"
+      printf 'Source file: `%s`\\n' "$source"
+      printf 'Affected files:\\n'
+      printf -- '- `%s`\\n' "$source"
+      printf '\\n'
+      printf '## Overview\\n'
+      printf 'Tighten the implementation.\\n'
+      printf '## Findings\\n'
+      printf 'One concrete finding.\\n'
+      printf '## Recommendations\\n'
+      printf 'Apply the cleanup.\\n'
+      printf '## Verification\\n'
+      printf 'Run focused tests.\\n'
+    } > "$output"
+    """)
+
+    File.chmod!(codex_path, 0o755)
+
+    previous_path = System.get_env("PATH")
+    previous_tool_check = System.get_env("REVIEW_TOOL_CHECK")
+    previous_concurrency = System.get_env("REVIEW_CONCURRENCY")
+
+    try do
+      System.put_env("PATH", bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("REVIEW_TOOL_CHECK", "0")
+      System.put_env("REVIEW_CONCURRENCY", "2")
+
+      in_dir(root, fn ->
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert :ok = Review.Generate.main(["lib/a.ex", "lib/b.ex"])
+        end)
+      end)
+
+      assert File.read!(Path.join(root, "review/lib/a.ex/review.log")) =~
+               "full transcript for lib/a.ex"
+
+      assert File.read!(Path.join(root, "review/lib/b.ex/review.log")) =~
+               "full transcript for lib/b.ex"
+    after
+      restore_env("PATH", previous_path)
+      restore_env("REVIEW_TOOL_CHECK", previous_tool_check)
+      restore_env("REVIEW_CONCURRENCY", previous_concurrency)
+    end
+  end
+
+  test "generate resume mode resumes the per-review codex session" do
+    root = tmp_dir("generate-review-resume")
+    bin_dir = tmp_dir("fake-codex-resume-bin")
+    codex_path = Path.join(bin_dir, "codex")
+
+    write_file!(root, "lib/a.ex")
+    File.mkdir_p!(bin_dir)
+
+    File.write!(codex_path, """
+    #!/bin/sh
+    args="$*"
+    output=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output-last-message)
+          shift
+          output="$1"
+          ;;
+      esac
+
+      shift
+    done
+
+    printf '%s\\n' "$args" >> codex_args.log
+
+    if printf '%s' "$args" | grep -q "exec resume"; then
+      source="lib/a.ex"
+      overview="Resumed session review."
+    else
+      source="lib/a.ex"
+      overview="Initial session review."
+    fi
+
+    printf '{"type":"thread.started","thread_id":"session-for-lib-a"}\\n'
+
+    {
+      printf '# Review: %s\\n' "$source"
+      printf 'Source file: `%s`\\n' "$source"
+      printf 'Affected files:\\n'
+      printf -- '- `%s`\\n' "$source"
+      printf '\\n'
+      printf '## Overview\\n'
+      printf '%s\\n' "$overview"
+      printf '## Findings\\n'
+      printf 'One concrete finding.\\n'
+      printf '## Recommendations\\n'
+      printf 'Apply the cleanup.\\n'
+      printf '## Verification\\n'
+      printf 'Run focused tests.\\n'
+    } > "$output"
+    """)
+
+    File.chmod!(codex_path, 0o755)
+
+    previous_path = System.get_env("PATH")
+    previous_tool_check = System.get_env("REVIEW_TOOL_CHECK")
+
+    try do
+      System.put_env("PATH", bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("REVIEW_TOOL_CHECK", "0")
+
+      in_dir(root, fn ->
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert :ok = Review.Generate.main(["lib/a.ex"])
+        end)
+
+        assert File.read!("review/lib/a.ex/review.session") == "session-for-lib-a\n"
+
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert :ok = Review.Generate.main(["--resume", "lib/a.ex"])
+        end)
+      end)
+
+      assert File.read!(Path.join(root, "review/lib/a.ex/review.md")) =~
+               "Resumed session review."
+
+      assert File.read!(Path.join(root, "codex_args.log")) =~
+               "exec resume --json --output-last-message"
+
+      assert File.read!(Path.join(root, "codex_args.log")) =~ "session-for-lib-a"
+    after
+      restore_env("PATH", previous_path)
+      restore_env("REVIEW_TOOL_CHECK", previous_tool_check)
+    end
+  end
+
+  test "generate codex options can be configured with application config" do
+    root = tmp_dir("generate-codex-config")
+    bin_dir = tmp_dir("fake-codex-generate-config-bin")
+    codex_path = Path.join(bin_dir, "codex")
+
+    write_file!(root, "lib/a.ex")
+    File.mkdir_p!(bin_dir)
+
+    File.write!(codex_path, """
+    #!/bin/sh
+    args="$*"
+    root=""
+    output=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --cd)
+          shift
+          root="$1"
+          ;;
+        --output-last-message)
+          shift
+          output="$1"
+          ;;
+      esac
+
+      shift
+    done
+
+    printf '%s\\n' "$args" >> "$root/codex_args.log"
+
+    {
+      printf '# Review: lib/a.ex\\n'
+      printf 'Source file: `lib/a.ex`\\n'
+      printf 'Affected files:\\n'
+      printf -- '- `lib/a.ex`\\n'
+      printf '\\n'
+      printf '## Overview\\n'
+      printf 'Tighten the implementation.\\n'
+      printf '## Findings\\n'
+      printf 'One concrete finding.\\n'
+      printf '## Recommendations\\n'
+      printf 'Apply the cleanup.\\n'
+      printf '## Verification\\n'
+      printf 'Run focused tests.\\n'
+    } > "$output"
+    """)
+
+    File.chmod!(codex_path, 0o755)
+
+    previous_path = System.get_env("PATH")
+    previous_tool_check = System.get_env("REVIEW_TOOL_CHECK")
+    previous_reasoning = Application.get_env(:review, :codex_reasoning_effort)
+    previous_fast = Application.get_env(:review, :codex_fast_mode)
+
+    try do
+      System.put_env("PATH", bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("REVIEW_TOOL_CHECK", "0")
+      Application.put_env(:review, :codex_reasoning_effort, "medium")
+      Application.put_env(:review, :codex_fast_mode, false)
+
+      in_dir(root, fn ->
+        ExUnit.CaptureIO.capture_io(fn ->
+          assert :ok = Review.Generate.main(["lib/a.ex"])
+        end)
+      end)
+
+      codex_args = File.read!(Path.join(root, "codex_args.log"))
+      assert codex_args =~ "model_reasoning_effort=medium"
+      assert codex_args =~ "--disable fast_mode"
+    after
+      restore_env("PATH", previous_path)
+      restore_env("REVIEW_TOOL_CHECK", previous_tool_check)
+      restore_app_env(:codex_reasoning_effort, previous_reasoning)
+      restore_app_env(:codex_fast_mode, previous_fast)
     end
   end
 
